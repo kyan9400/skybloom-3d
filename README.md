@@ -4,7 +4,7 @@ A concept website for **Skybloom**, a fictional eco-city developer. Scroll throu
 grows in real-time 3D: glass-and-timber towers rise out of the ground, gardens climb their facades and the light
 moves from morning to dusk until the windows come on one by one.
 
-Live: <!-- LIVE_URL -->
+Live: https://skybloom-3d.vercel.app
 
 > Concept project — fictional brand.
 

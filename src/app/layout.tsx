@@ -16,9 +16,7 @@ const manrope = Manrope({
   display: "swap",
 });
 
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3000");
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://skybloom-3d.vercel.app";
 
 const description =
   "Skybloom builds glass-and-timber districts where every tower carries its own garden. Scroll to watch one grow, from bare ground to a living neighbourhood at dusk.";

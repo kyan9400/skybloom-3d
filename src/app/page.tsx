@@ -1,4 +1,5 @@
 import DistrictArt from "@/components/DistrictArt";
+import MobileMenu from "@/components/MobileMenu";
 import MotionToggle from "@/components/MotionToggle";
 import StoryStage from "@/components/StoryStage";
 import SiteFooter from "@/components/SiteFooter";
@@ -131,6 +132,7 @@ export default function Home() {
           </ul>
         </nav>
         <MotionToggle />
+        <MobileMenu nav={NAV} cta={{ href: "#contact", label: "Talk to us" }} />
       </header>
 
       <main id="main" tabIndex={-1}>

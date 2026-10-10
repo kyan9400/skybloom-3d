@@ -137,7 +137,8 @@ GitHub) · © 2026 Alhassan Alfarran · motion toggle.
 | asset | source | license |
 |---|---|---|
 | All 3D geometry, shaders, sky, ground | written in code | owned (see LICENSE) |
-| No-WebGL poster, favicon, OG image | code (inline SVG / next/og) | owned |
+| No-WebGL poster, favicon | code (inline SVG) | owned |
+| OG / Twitter image | screenshot of this site (src/app/opengraph-image.png) | owned |
 | Fraunces, Manrope | Google Fonts via next/font | SIL OFL 1.1 |
 | npm libraries | see CREDITS.md | MIT |
 No downloaded images, models, HDRIs or textures.

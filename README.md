@@ -39,8 +39,8 @@ render loop instead of Lenis, which keeps exactly one smoothing layer and a smal
 
 ## Project layout
 ```
-src/app/            layout, page, 404, globals.css (design tokens), icon.svg, OG/Twitter images, robots, sitemap
-src/components/     StoryStage (sticky 3D stage), Poster (no-WebGL), MotionToggle, DistrictArt, SiteFooter
+src/app/            layout, page, 404, globals.css (design tokens), icon.svg, OG/Twitter images (PNG screenshots of the live site), robots, sitemap
+src/components/     StoryStage (sticky 3D stage), Poster (no-WebGL), MotionToggle, MobileMenu, DistrictArt, SiteFooter
 src/components/three/
   Scene.tsx         Canvas, frame loop, camera path, time of day, adaptive DPR
   city.ts           seeded district layout, leaf clusters, shadow heightfield
@@ -58,8 +58,8 @@ npm run lint
 ```
 
 ## Credits
-Fonts: Fraunces and Manrope (SIL OFL 1.1). Libraries: see [CREDITS.md](CREDITS.md). All 3D, illustrations, favicon
-and social images are made in code for this project.
+Fonts: Fraunces and Manrope (SIL OFL 1.1). Libraries: see [CREDITS.md](CREDITS.md). All 3D, illustrations and the favicon
+are made in code for this project; the social preview image is a screenshot of the live site.
 
 ## Copyright
 © 2026 Alhassan Alfarran. All rights reserved — see [LICENSE](LICENSE).

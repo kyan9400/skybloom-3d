@@ -269,6 +269,134 @@ main:focus {
 .motion-toggle:hover {
   background: var(--color-paper-2);
 }
+
+/* ---------------------------------------------------------------- mobile menu (below 900px) */
+
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-ink);
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.menu-button:hover {
+  background: var(--color-moss);
+  border-color: var(--color-moss);
+}
+.menu-button__icon {
+  position: relative;
+  width: 16px;
+  height: 10px;
+}
+.menu-button__icon span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transition: transform 0.25s ease;
+}
+.menu-button__icon span:first-child {
+  top: 0;
+}
+.menu-button__icon span:last-child {
+  bottom: 0;
+}
+.menu-button__icon[data-open="true"] span:first-child {
+  transform: translateY(4px) rotate(45deg);
+}
+.menu-button__icon[data-open="true"] span:last-child {
+  transform: translateY(-4px) rotate(-45deg);
+}
+.mobile-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: calc(100svh - 69px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--gutter) var(--space-8);
+  box-sizing: border-box;
+  background: var(--color-paper);
+  border-bottom: 1px solid rgb(19 38 31 / 0.12);
+  box-shadow: 0 24px 48px -24px rgb(19 38 31 / 0.35);
+  opacity: 0;
+  transform: translateY(-8px);
+  visibility: hidden;
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+}
+.mobile-menu[data-open="true"] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
+}
+.mobile-menu__link {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  border-bottom: 1px solid rgb(19 38 31 / 0.12);
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--color-ink);
+}
+.mobile-menu__link:hover {
+  color: var(--color-moss);
+}
+.mobile-menu__cta {
+  margin-top: var(--space-6);
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (min-width: 900px) {
+  .menu-button,
+  .mobile-menu {
+    display: none;
+  }
+}
+@media (max-width: 479px) {
+  .menu-button {
+    padding: 0;
+    width: 44px;
+  }
+  .menu-button__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+@media (max-width: 399px) {
+  .site-header {
+    gap: var(--space-2);
+  }
+  .brand {
+    font-size: 1.125rem;
+  }
+}
+/* the logo mark carries the name (aria-label) on the narrowest phones so the controls never overflow at 320px */
+@media (max-width: 359px) {
+  .brand > span {
+    display: none;
+  }
+}
 .motion-toggle__dot {
   width: 8px;
   height: 8px;
@@ -370,6 +498,26 @@ main:focus {
 }
 .hero__inner {
   max-width: 780px;
+}
+/* a soft paper wash behind the copy so the lede never sits straight on the busy tree line (gradient, not a filter) */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgb(244 240 230 / 0) 22%,
+    rgb(244 240 230 / 0.62) 42%,
+    rgb(244 240 230 / 0.62) 74%,
+    rgb(244 240 230 / 0) 90%
+  );
+}
+@media (min-width: 900px) {
+  .hero::before {
+    background: linear-gradient(90deg, rgb(244 240 230 / 0.6) 0%, rgb(244 240 230 / 0.45) 34%, rgb(244 240 230 / 0) 58%);
+  }
 }
 .hero__title {
   margin-top: var(--space-4);

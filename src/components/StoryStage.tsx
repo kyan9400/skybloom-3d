@@ -3,24 +3,26 @@
 /*
  * The sticky stage behind the hero and the four story chapters.
  * Decides 3D vs poster (probe + quality tier happen before the Canvas exists), writes scroll progress into the
- * shared story store and asks the scene for a frame. The 3D chunk is loaded lazily, after the browser goes idle.
+ * shared story store and asks the scene for a frame.
+ * Loading order: the server HTML paints the hero over the painted sky; only after window 'load' and an idle slot
+ * do we probe the GPU (a tiny throwaway context, no three.js). Software renderers (SwiftShader, llvmpipe, ...) get
+ * the SVG poster and the 3D chunk is never downloaded; ?quality= forces the 3D on. Otherwise the chunk is
+ * imported, warmed up behind the loader and faded in with opacity only.
  */
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { getReducedMotion, subscribeMotion } from "@/lib/motion";
-import { probeGpu } from "@/lib/quality";
+import { probeGpu, wants3d, type GpuProbe } from "@/lib/quality";
+import { afterLoadIdle } from "@/lib/schedule";
 import { requestFrame, story } from "@/lib/story";
 import Poster from "./Poster";
 
 const Scene = dynamic(() => import("./three/Scene"), { ssr: false });
 
-const noopSubscribe = () => () => {};
-
 export default function StoryStage() {
-  const gpu = useSyncExternalStore(noopSubscribe, probeGpu, () => null);
+  const [gpu, setGpu] = useState<GpuProbe | null>(null);
   const reduced = useSyncExternalStore(subscribeMotion, getReducedMotion, () => true);
-  const [mount, setMount] = useState(false);
   const [ready, setReady] = useState(false);
   const [lost, setLost] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -28,16 +30,8 @@ export default function StoryStage() {
   const onReady = useCallback(() => setReady(true), []);
   const onLost = useCallback(() => setLost(true), []);
 
-  // start loading the 3D once the page itself is interactive
-  useEffect(() => {
-    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
-    if (w.requestIdleCallback) {
-      const id = w.requestIdleCallback(() => setMount(true), { timeout: 1500 });
-      return () => w.cancelIdleCallback?.(id);
-    }
-    const id = window.setTimeout(() => setMount(true), 300);
-    return () => window.clearTimeout(id);
-  }, []);
+  // probe + start loading the 3D only once the page itself is loaded and the browser is idle
+  useEffect(() => afterLoadIdle(() => setGpu(probeGpu())), []);
 
   // scroll progress through the story section + visibility + pointer
   useEffect(() => {
@@ -80,18 +74,22 @@ export default function StoryStage() {
     };
   }, []);
 
-  const use3d = gpu?.webgl === true && !lost;
+  const use3d = gpu !== null && wants3d(gpu) && !lost;
   const showPoster = gpu !== null && !use3d;
 
   return (
     <div ref={stageRef} className="stage sticky top-0 h-svh w-full overflow-hidden" aria-hidden="true">
       <div className="stage__sky absolute inset-0" />
-      {use3d && mount ? (
+      {use3d ? (
         <div className={`stage__canvas absolute inset-0 ${ready ? "is-ready" : ""}`}>
           <Scene tier={gpu.tier} reducedMotion={reduced} onReady={onReady} onLost={onLost} />
         </div>
       ) : null}
-      {showPoster ? <Poster /> : null}
+      {showPoster ? (
+        <div className="stage__poster absolute inset-0">
+          <Poster />
+        </div>
+      ) : null}
       {use3d && !ready ? (
         <div className="stage__loader">
           <span className="stage__seed" />

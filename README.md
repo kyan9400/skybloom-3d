@@ -23,12 +23,14 @@ Live: https://skybloom-3d.vercel.app
 - **Performance rules applied:** render on demand, quality tiers chosen from the GPU before the canvas exists,
   idle-aware adaptive DPR, one scroll smoothing layer, shader warm-up (`compileAsync`) behind a loader, no per-frame
   allocations, reduced-motion by default with a "Turn on full motion" toggle, and a designed SVG poster when WebGL is
-  missing or the context is lost. Append `?quality=low|medium|high` or `?motion=full|reduced` to test.
+  missing, the context is lost or the GPU is a software renderer (SwiftShader, llvmpipe, ...). Append `?quality=low|medium|high` or `?motion=full|reduced` to test.
 
 ## Tech stack
 Next.js 16 (App Router, TypeScript, `src/`), React 19, three.js 0.186 + @react-three/fiber 9, Tailwind CSS 4.
-The 3D scene is a client component loaded with `next/dynamic(..., { ssr: false })` after the page is idle, so the
-HTML (and the hero heading) renders instantly.
+The 3D scene is a client component loaded with `next/dynamic(..., { ssr: false })` only after window `load` and an
+idle callback, so the HTML (and the hero heading) renders instantly and hydration never competes with the scene.
+A cheap GPU probe (a throwaway WebGL context, no three.js) runs first: software renderers get the poster and the 3D
+chunk is never downloaded (`?quality=` forces it on). Scene data is built in small steps that yield to the browser.
 
 Versions are pinned exactly as in the shared stack file. Deliberate differences: `@react-three/drei`, `gsap`/`@gsap/react`,
 `lenis` and `@react-three/postprocessing` are not installed — the scene needs no drei helper (adaptive DPR is a small

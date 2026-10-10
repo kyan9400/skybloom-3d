@@ -7,6 +7,7 @@
  */
 
 import type { TierSettings } from "@/lib/quality";
+import { nextTask } from "@/lib/schedule";
 
 export const PLOT_RADIUS = 29;
 export const MAX_HEIGHT = 44; // used to pack heights into the 8-bit heightfield
@@ -112,7 +113,8 @@ function makeTowers(rand: () => number): Tower[] {
   return towers;
 }
 
-export function buildCity(settings: TierSettings): CityData {
+/** Builds the district in a few steps, handing the main thread back between them (no single long task). */
+export async function buildCity(settings: TierSettings): Promise<CityData> {
   const rand = mulberry32(20310417);
   const towers = makeTowers(rand).slice(0, settings.towers);
   const volumes = towers.flatMap((t) => t.volumes);
@@ -125,6 +127,8 @@ export function buildCity(settings: TierSettings): CityData {
     sizes.set([v.w, v.h, v.d], i * 3);
     seeds.set([v.delay, v.seed, v.top, 0.35 + 0.65 * ((v.seed * 7.31) % 1)], i * 4);
   });
+
+  await nextTask();
 
   // ---- leaf clusters: generate ~2x the budget, shuffle deterministically, keep the budget ----
   type Leaf = [number, number, number, number, number, number, number, number, number, number];
@@ -172,6 +176,8 @@ export function buildCity(settings: TierSettings): CityData {
     }
   }
 
+  await nextTask();
+
   // ground: park trees, avenue rows and the forest ring around the plot
   const groundN = target * (1 - towerShare);
   let placed = 0;
@@ -218,6 +224,8 @@ export function buildCity(settings: TierSettings): CityData {
     }
   }
 
+  await nextTask();
+
   // deterministic shuffle, keep the budget
   for (let i = leaves.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
@@ -232,6 +240,8 @@ export function buildCity(settings: TierSettings): CityData {
     hosts.set([l[3], l[4], l[5]], i * 3);
     plants.set([l[6], l[7], l[8], l[9]], i * 4);
   });
+
+  await nextTask();
 
   // ---- heightfield for ground shadows ----
   const field = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);

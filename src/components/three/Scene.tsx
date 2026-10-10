@@ -7,12 +7,13 @@
  * or the wind sway is running (high tier, full motion, on screen).
  */
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { TIERS, type Tier, type TierSettings } from "@/lib/quality";
+import { nextTask } from "@/lib/schedule";
 import { story } from "@/lib/story";
-import { buildCity, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS } from "./city";
+import { buildCity, type CityData, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS } from "./city";
 import {
   groundFragment,
   groundVertex,
@@ -124,18 +125,17 @@ function useAdaptiveDpr(cap: number) {
 
 interface DistrictProps {
   settings: TierSettings;
+  city: CityData;
   cap: number;
   reducedMotion: boolean;
   onReady: () => void;
 }
 
-function District({ settings, cap, reducedMotion, onReady }: DistrictProps) {
+function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps) {
   const { gl, scene, camera, invalidate, size, get } = useThree();
   const skyRef = useRef<THREE.Mesh>(null);
   const reducedRef = useRef(reducedMotion);
   const adapt = useAdaptiveDpr(cap);
-
-  const city = useMemo(() => buildCity(settings), [settings]);
 
   const assets = useMemo(() => {
     const shared = {
@@ -239,7 +239,7 @@ function District({ settings, cap, reducedMotion, onReady }: DistrictProps) {
     };
   }, [invalidate]);
 
-  // warm-up: compile every shader before the canvas is revealed
+  // warm-up: compile every shader before the canvas is revealed (after a yield, so it is a task of its own)
   useEffect(() => {
     let cancelled = false;
     const reveal = () => {
@@ -247,7 +247,9 @@ function District({ settings, cap, reducedMotion, onReady }: DistrictProps) {
       invalidate();
       requestAnimationFrame(() => requestAnimationFrame(() => !cancelled && onReady()));
     };
-    gl.compileAsync(scene, camera).then(reveal, reveal);
+    nextTask()
+      .then(() => (cancelled ? undefined : gl.compileAsync(scene, camera)))
+      .then(reveal, reveal);
     return () => {
       cancelled = true;
     };
@@ -352,6 +354,16 @@ export interface SceneProps {
 export default function Scene({ tier, reducedMotion, onReady, onLost }: SceneProps) {
   const settings = TIERS[tier];
   const cap = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, settings.dprCap);
+  // build the district data first, in small steps, before the WebGL context is even created
+  const [built, setBuilt] = useState<{ settings: TierSettings; city: CityData } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    buildCity(settings).then((city) => !cancelled && setBuilt({ settings, city }));
+    return () => {
+      cancelled = true;
+    };
+  }, [settings]);
+  if (!built || built.settings !== settings) return null;
   return (
     <Canvas
       frameloop="demand"
@@ -366,7 +378,7 @@ export default function Scene({ tier, reducedMotion, onReady, onLost }: ScenePro
         });
       }}
     >
-      <District settings={settings} cap={cap} reducedMotion={reducedMotion} onReady={onReady} />
+      <District settings={settings} city={built.city} cap={cap} reducedMotion={reducedMotion} onReady={onReady} />
     </Canvas>
   );
 }

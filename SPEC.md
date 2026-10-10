@@ -59,8 +59,9 @@ Reduced motion: scroll-linked growth still works but cuts directly to the scroll
 sway, no idle camera drift. A "Turn on full motion" toggle in the header (remembered in localStorage,
 `?motion=full|reduced` overrides).
 
-No WebGL / context lost: a designed inline-SVG poster (dusk skyline with planted towers) replaces the canvas; all
-content remains readable.
+No WebGL / context lost / software renderer (SwiftShader, llvmpipe, "Microsoft Basic Render", or a
+`failIfMajorPerformanceCaveat` refusal): a designed inline-SVG poster (dusk skyline with planted towers) replaces the canvas behind a light paper veil;
+all content remains readable. In that case the 3D chunk is never downloaded; `?quality=low|medium|high` forces 3D on.
 
 Warm-up: the canvas stays transparent behind a small "Breaking ground" loader until `gl.compileAsync` resolves and the
 first frame is drawn, then fades in. The hero text is server-rendered and visible immediately.
@@ -143,8 +144,9 @@ No downloaded images, models, HDRIs or textures.
 
 ## Performance budget
 - First-load JS for `/` < 250 KB gzip (target ≈ 160 KB), 3D chunk lazy via `next/dynamic({ ssr: false })`.
-- 3D chunk: three + @react-three/fiber + scene code (loaded after hydration, on idle).
+- 3D chunk: three + @react-three/fiber + scene code (requested only after window `load` + `requestIdleCallback`,
+  never for software renderers; the scene build yields between steps and before `compileAsync`).
 - Draw calls: 4 (sky, ground, towers, plants). Triangles: < 200 k on high.
 - No textures, no fonts beyond two variable families (subset latin, `display: swap`).
-- LCP element: hero h1 (server-rendered text). CLS ~ 0 (canvas is absolutely positioned).
+- LCP element: hero h1 / lede (server-rendered text, no JS-driven reveal). CLS ~ 0 (canvas is absolutely positioned).
 - Lighthouse mobile: Perf ≥ 85, A11y/BP/SEO ≥ 95.

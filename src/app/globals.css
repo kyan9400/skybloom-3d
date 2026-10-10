@@ -318,6 +318,13 @@ main:focus {
 .stage__canvas.is-ready {
   opacity: 1;
 }
+/* poster mode (no WebGL, software renderer, lost context): a paper veil keeps the ink copy readable over the dusk art */
+.stage__poster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(244 240 230 / 0.82) 0%, rgb(244 240 230 / 0.74) 62%, rgb(244 240 230 / 0.2) 100%);
+}
 .stage__canvas canvas {
   display: block;
   touch-action: pan-y;

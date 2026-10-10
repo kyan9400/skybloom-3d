@@ -1,8 +1,8 @@
 /*
  * Quality tier, decided BEFORE the Canvas is created.
  * One throwaway WebGL context tells us whether 3D works at all and which GPU this is.
- *   software renderers -> low · integrated laptop / phone GPUs -> at most medium · touch devices -> at most medium
- *   ?quality=low|medium|high overrides.
+ *   software renderers -> no 3D at all (poster) · integrated laptop / phone GPUs -> at most medium · touch devices -> at most medium
+ *   ?quality=low|medium|high overrides (and forces the 3D on, even on a software renderer).
  */
 
 export type Tier = "low" | "medium" | "high";
@@ -22,50 +22,78 @@ export const TIERS: Record<Tier, TierSettings> = {
 };
 
 export interface GpuProbe {
+  /** a WebGL2 context could be created (with ?quality= forced, even a slow one) */
   webgl: boolean;
+  /** software rasteriser (SwiftShader, llvmpipe, ...) or the browser flagged a major performance caveat */
+  software: boolean;
+  /** ?quality=low|medium|high was given: show the 3D whatever the GPU */
+  forced: boolean;
   tier: Tier;
   gpu: string;
 }
 
 let cached: GpuProbe | null = null;
 
+const SOFTWARE_GPU = /swiftshader|llvmpipe|softpipe|software|basic render|mesa offscreen/i;
+
 function isTier(value: string | null): value is Tier {
   return value === "low" || value === "medium" || value === "high";
 }
 
-function gpuName(gl: WebGL2RenderingContext | WebGLRenderingContext) {
+function gpuName(gl: WebGL2RenderingContext) {
   const name = String(gl.getParameter(gl.RENDERER) || "");
   if (!/^webkit/i.test(name)) return name; // Firefox already reports the real name
   const info = gl.getExtension("WEBGL_debug_renderer_info");
   return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL) || name) : name;
 }
 
-/** Client only, cached after the first call. */
+function context(options: WebGLContextAttributes): WebGL2RenderingContext | null {
+  try {
+    return document.createElement("canvas").getContext("webgl2", options);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Client only, cached after the first call. Cheap: a 300x150 throwaway context, no three.js.
+ * Call it after the page has loaded (see StoryStage), never during hydration.
+ */
 export function probeGpu(): GpuProbe {
   if (cached) return cached;
-  const forced = new URLSearchParams(window.location.search).get("quality");
-  let gl: WebGL2RenderingContext | null = null;
-  try {
-    gl = document.createElement("canvas").getContext("webgl2", { powerPreference: "high-performance" });
-  } catch {
-    gl = null;
+  const param = new URLSearchParams(window.location.search).get("quality");
+  const forced = isTier(param);
+
+  // the browser refuses this when it would fall back to a slow (software) path
+  let gl = context({ failIfMajorPerformanceCaveat: true });
+  let caveat = false;
+  if (!gl) {
+    caveat = true;
+    // only worth a second context when the URL insists on 3D anyway
+    if (forced) gl = context({});
   }
   if (!gl) {
-    cached = { webgl: false, tier: "low", gpu: "" };
+    cached = { webgl: false, software: caveat, forced, tier: "low", gpu: "" };
     return cached;
   }
   const gpu = gpuName(gl);
   gl.getExtension("WEBGL_lose_context")?.loseContext(); // free it right away
+  const software = caveat || SOFTWARE_GPU.test(gpu);
 
   let tier: Tier = "high";
   const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
   const cores = nav.hardwareConcurrency || 4;
   const memory = nav.deviceMemory || 4;
   const touch = window.matchMedia("(pointer: coarse)").matches;
-  if (/swiftshader|llvmpipe|software|basic render/i.test(gpu) || nav.connection?.saveData || cores <= 2 || memory <= 2) tier = "low";
+  if (software || nav.connection?.saveData || cores <= 2 || memory <= 2) tier = "low";
   else if (touch || cores <= 4 || /intel|uhd|iris|mali|adreno|powervr|apple gpu|radeon\(tm\) graphics|radeon graphics/i.test(gpu)) tier = "medium";
-  if (isTier(forced)) tier = forced;
+  if (forced) tier = param;
 
-  cached = { webgl: true, tier, gpu };
+  cached = { webgl: true, software, forced, tier, gpu };
   return cached;
+}
+
+/** Software renderers get the poster, not the 3D, unless ?quality= forces it. */
+export function wants3d(probe: GpuProbe): boolean {
+  return probe.webgl && (!probe.software || probe.forced);
 }

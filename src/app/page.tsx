@@ -1,8 +1,11 @@
 import DistrictArt from "@/components/DistrictArt";
 import MobileMenu from "@/components/MobileMenu";
 import MotionToggle from "@/components/MotionToggle";
+import ScrollChrome from "@/components/ScrollChrome";
 import StoryStage from "@/components/StoryStage";
 import SiteFooter from "@/components/SiteFooter";
+import { PORTFOLIO_URL, SITE_DESCRIPTION, SITE_URL } from "@/lib/site";
+import type { CSSProperties } from "react";
 
 const NAV = [
   { href: "#story", label: "Story" },
@@ -105,6 +108,26 @@ const PROCESS = [
   { title: "Tend", text: "We stay on as gardeners for ten years, then hand the tools to residents." },
 ];
 
+// three facts from the districts below, shown beside the hero on wide screens
+const HERO_META = [
+  ["14 towers", "Lumen Quay"],
+  ["61 floors", "Verdant Spire"],
+  ["11 ha", "Fernhill Commons"],
+] as const;
+
+const JSON_LD = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "Skybloom",
+  url: SITE_URL,
+  description: SITE_DESCRIPTION,
+  about: "Concept project — fictional brand.",
+  author: { "@type": "Person", name: "Alhassan Alfarran", url: PORTFOLIO_URL },
+};
+
+/** stagger index for the reveal transition */
+const stagger = (i: number) => ({ "--i": i }) as CSSProperties;
+
 export default function Home() {
   return (
     <>
@@ -112,37 +135,42 @@ export default function Home() {
         Skip to content
       </a>
 
-      <header className="site-header">
-        <a href="#main" className="brand" aria-label="Skybloom, back to top">
-          <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
-            <rect x="9" y="8" width="6" height="20" rx="1" fill="currentColor" />
-            <rect x="17" y="13" width="6" height="15" rx="1" fill="currentColor" opacity="0.75" />
-            <circle cx="12" cy="7" r="4" fill="var(--color-moss)" />
-            <circle cx="21" cy="12" r="3" fill="var(--color-bloom)" />
-          </svg>
-          <span>Skybloom</span>
-        </a>
-        <nav aria-label="Main" className="site-nav">
-          <ul>
-            {NAV.map((item) => (
-              <li key={item.href}>
-                <a href={item.href}>{item.label}</a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <MotionToggle />
-        <MobileMenu nav={NAV} cta={{ href: "#contact", label: "Talk to us" }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }} />
+
+      <header className="site-header" data-scrolled="false">
+        <div className="site-header__inner">
+          <a href="#main" className="brand" aria-label="Skybloom, back to top">
+            <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">
+              <rect x="9" y="8" width="6" height="20" rx="1" fill="currentColor" />
+              <rect x="17" y="13" width="6" height="15" rx="1" fill="currentColor" opacity="0.75" />
+              <circle cx="12" cy="7" r="4" fill="var(--color-moss)" />
+              <circle cx="21" cy="12" r="3" fill="var(--color-bloom)" />
+            </svg>
+            <span>Skybloom</span>
+          </a>
+          <nav aria-label="Main" className="site-nav">
+            <ul>
+              {NAV.map((item) => (
+                <li key={item.href}>
+                  <a href={item.href}>{item.label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <MotionToggle />
+          <MobileMenu nav={NAV} cta={{ href: "#contact", label: "Talk to us" }} />
+        </div>
       </header>
+      <ScrollChrome chapters={CHAPTERS.map(({ id, num, label }) => ({ id, num, label }))} />
 
       <main id="main" tabIndex={-1}>
         {/* ---------------- 3D story: hero + four chapters over the sticky district ---------------- */}
         <section id="story" data-story aria-labelledby="hero-title" className="story">
           <StoryStage />
           <div className="story__content">
-            <div className="hero">
+            <div className="hero" id="hero">
               <div className="hero__inner">
-                <p className="eyebrow">Eco-city developer · est. 2014</p>
+                <p className="eyebrow hero__eyebrow">Eco-city developer · est. 2014</p>
                 <h1 id="hero-title" className="hero__title">
                   Cities that <em>grow</em> back.
                 </h1>
@@ -158,16 +186,26 @@ export default function Home() {
                   </a>
                 </div>
               </div>
+              <ul className="hero__meta" aria-label="Our districts in numbers">
+                {HERO_META.map(([fact, place]) => (
+                  <li key={place}>
+                    <span className="hero__meta-fact">{fact}</span> <span className="hero__meta-place">· {place}</span>
+                  </li>
+                ))}
+              </ul>
               <p className="hero__hint" aria-hidden="true">
-                <span className="hero__hint-line" /> Scroll to grow the district
+                <span className="hero__tick">
+                  <span />
+                </span>{" "}
+                Scroll to grow the district
               </p>
             </div>
 
             {CHAPTERS.map((c) => (
               <article key={c.id} id={c.id} className={`chapter chapter--${c.side}`} aria-labelledby={`${c.id}-title`}>
-                <div className={`chapter__card ${c.id === "dusk" ? "chapter__card--dusk" : ""}`}>
+                <div className={`chapter__card ${c.id === "dusk" ? "chapter__card--dusk" : ""}`} data-reveal="parts">
                   <p className="chapter__num">
-                    <span>{c.num}</span> {c.label}
+                    <span>{c.num}</span> <span className="chapter__label">{c.label}</span>
                   </p>
                   <h2 id={`${c.id}-title`} className="chapter__title">
                     {c.title}
@@ -183,7 +221,7 @@ export default function Home() {
         {/* ---------------- Districts ---------------- */}
         <section id="districts" className="band band--paper" aria-labelledby="districts-title">
           <div className="wrap">
-            <div className="section-head">
+            <div className="section-head" data-reveal>
               <p className="eyebrow">Built &amp; building</p>
               <h2 id="districts-title" className="section-title">
                 Three districts, <em>one idea</em>.
@@ -191,8 +229,8 @@ export default function Home() {
               <p className="section-lede">Each place is different. The rule is the same: the garden is part of the structure, not added at the end.</p>
             </div>
             <ul className="districts">
-              {DISTRICTS.map((d) => (
-                <li key={d.name} className="district">
+              {DISTRICTS.map((d, i) => (
+                <li key={d.name} className="district" data-reveal style={stagger(i)}>
                   <div className="district__art">
                     <DistrictArt kind={d.kind} />
                   </div>
@@ -218,7 +256,7 @@ export default function Home() {
         {/* ---------------- Principles ---------------- */}
         <section id="principles" className="band band--paper-2" aria-labelledby="principles-title">
           <div className="wrap principles-grid">
-            <div className="section-head section-head--sticky">
+            <div className="section-head section-head--sticky" data-reveal>
               <p className="eyebrow">Principles</p>
               <h2 id="principles-title" className="section-title">
                 How we <em>build</em>.
@@ -226,8 +264,8 @@ export default function Home() {
               <p className="section-lede">Four rules we do not negotiate on, written into every contract we sign.</p>
             </div>
             <ol className="principles">
-              {PRINCIPLES.map((p) => (
-                <li key={p.title} className="principle">
+              {PRINCIPLES.map((p, i) => (
+                <li key={p.title} className="principle" data-reveal style={stagger(i)}>
                   <p className="principle__num">{p.num}</p>
                   <div>
                     <h3 className="principle__title">{p.title}</h3>
@@ -242,17 +280,23 @@ export default function Home() {
         {/* ---------------- Impact ---------------- */}
         <section id="impact" className="band band--dusk" aria-labelledby="impact-title">
           <div className="wrap">
-            <div className="section-head">
+            <div className="section-head" data-reveal>
               <p className="eyebrow eyebrow--light">Impact, audited yearly</p>
               <h2 id="impact-title" className="section-title section-title--light">
                 Measured, <em>not promised</em>.
               </h2>
             </div>
             <dl className="impact">
-              {IMPACT.map((item) => (
-                <div key={item.label} className="impact__item">
+              {IMPACT.map((item, i) => (
+                <div key={item.label} className="impact__item" data-reveal style={stagger(i)}>
                   <dt className="impact__label">{item.label}</dt>
-                  <dd className="impact__value">{item.value}</dd>
+                  <dd className="impact__value">
+                    {/* screen readers get the final value; the visible copy may count up */}
+                    <span className="sr-only">{item.value}</span>
+                    <span aria-hidden="true" data-count={item.value}>
+                      {item.value}
+                    </span>
+                  </dd>
                 </div>
               ))}
             </dl>
@@ -262,7 +306,7 @@ export default function Home() {
         {/* ---------------- Process ---------------- */}
         <section id="process" className="band band--paper" aria-labelledby="process-title">
           <div className="wrap">
-            <div className="section-head">
+            <div className="section-head" data-reveal>
               <p className="eyebrow">Process</p>
               <h2 id="process-title" className="section-title">
                 From plot to <em>neighbourhood</em>.
@@ -271,7 +315,7 @@ export default function Home() {
             </div>
             <ol className="process">
               {PROCESS.map((step, i) => (
-                <li key={step.title} className="process__step">
+                <li key={step.title} className="process__step" data-reveal style={stagger(i)}>
                   <span className="process__num" aria-hidden="true">
                     {String(i + 1).padStart(2, "0")}
                   </span>

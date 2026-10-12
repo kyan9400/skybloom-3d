@@ -13,12 +13,18 @@ export interface TierSettings {
   towers: number;
   leaves: number;
   sway: boolean;
+  /** perimeter points of the rounded tower section */
+  seg: number;
+  /** towers shadow each other (heightfield march in the facade shader) */
+  selfShadow: boolean;
+  /** additive lamp glows at dusk (one extra draw call) */
+  glow: boolean;
 }
 
 export const TIERS: Record<Tier, TierSettings> = {
-  high: { dprCap: 2, antialias: true, towers: 150, leaves: 7000, sway: true },
-  medium: { dprCap: 1.5, antialias: true, towers: 100, leaves: 4000, sway: false },
-  low: { dprCap: 1, antialias: false, towers: 60, leaves: 1600, sway: false },
+  high: { dprCap: 2, antialias: true, towers: 150, leaves: 7000, sway: true, seg: 48, selfShadow: true, glow: true },
+  medium: { dprCap: 1.5, antialias: true, towers: 100, leaves: 4000, sway: false, seg: 32, selfShadow: true, glow: false },
+  low: { dprCap: 1, antialias: false, towers: 60, leaves: 1600, sway: false, seg: 16, selfShadow: false, glow: false },
 };
 
 export interface GpuProbe {

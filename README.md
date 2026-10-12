@@ -9,12 +9,17 @@ Live: https://skybloom-3d.vercel.app
 > Concept project — fictional brand.
 
 ## Signature 3D technique
-- **Instanced towers, one draw call.** Every tower volume is an instance of a unit box (`InstancedBufferGeometry`)
-  with per-instance footprint, height, growth delay and seed. A custom `ShaderMaterial` lifts each tower out of the
+- **Instanced rounded towers, one draw call.** Every tower volume is an instance of a unit superellipse prism built in
+  code (analytic, perfectly smooth normals; the window grid wraps around the rounded corners by arc length), with
+  per-instance footprint, height, growth delay and seed. A custom `ShaderMaterial` lifts each tower out of the
   ground from a single `uGrow` uniform, with delays that ripple outward from the park.
 - **Procedural facades.** Window bays, timber mullions and floor slabs are drawn in the fragment shader from world
-  coordinates; the glass reflects the analytic sky with fresnel and a sun glint, and at dusk individual windows light
-  up from a per-window hash.
+  coordinates, with storefronts, a parapet band, timber grain and slab shadow lines. The glass reflects the analytic
+  sky (the street below the horizon) with per-pane tilt, fresnel and a sharp + broad sun highlight, and towers shadow
+  each other through the heightfield (high/medium).
+- **The district switches on.** At dusk windows and street lamps light up in a wave spreading from the park, lower
+  floors first, with a bright front running down the avenues, additive lamp glows (high tier), a last pulse of the
+  survey ring and a slow scroll-driven dolly zoom. Chapter 01 opens with scan lines mapping the empty plot.
 - **Growth shader for the gardens.** A noise-broken "bloom front" climbs each facade (planter troughs on every slab,
   vines up some bays) and a second instanced mesh of ~20-triangle leaf clusters opens exactly as the front reaches it,
   with wind sway on the high tier.
@@ -54,6 +59,7 @@ SPEC.md             design spec: concept, copy, palette, budget
 npm install
 npm run dev     # http://localhost:3000
 npm run build   # production build
+npm run build:pages  # static GitHub Pages mirror in out/ (served under /skybloom-3d)
 npm run lint
 ```
 

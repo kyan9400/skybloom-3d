@@ -25,11 +25,13 @@ Tone: calm, confident, optimistic. Botanical editorial — a printed annual repo
 **"The district grows."** A sticky full-viewport canvas behind the hero and four chapters (≈ 460svh of scroll).
 
 Technique (all procedural, zero downloaded assets):
-- **Towers**: one `InstancedMesh` of a unit box (pivot at the base). Per-instance attributes: footprint, target height,
+- **Towers**: one instanced mesh of a unit rounded prism (superellipse section, n = 6, analytic normals, pivot at the
+  base; 48/32/16 perimeter points by tier). Towers shadow each other via an 8-step heightfield march (high/medium). Per-instance attributes: footprint, target height,
   growth delay (distance from the plot centre + noise, so towers rise in a ripple outward), hue seed. A custom
   `ShaderMaterial` scales the vertex Y by an eased growth value, so growth costs one uniform update per frame.
   Fragment: glass facade made from world-space window grid (mullions, floor slabs), fresnel sky reflection, sun glint,
-  and dusk window lights (per-window hash, turning on progressively with `uDusk`).
+  and dusk window lights (per-window hash, switching on in a wave from the park, lower floors first, with lamps,
+  a leading edge down the avenues, additive lamp glows on the high tier and a final dolly zoom).
 - **Vertical gardens**: the same tower fragment shader grows a green mask up each facade — value-noise bands on
   balcony floors that spread from the base upward as `uBloom` rises, with leaf-shade variation.
 - **Plants**: a second `InstancedMesh` of low-poly leaf clusters (icosahedron, 20 tris) on tower terraces, tops and the

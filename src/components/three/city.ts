@@ -3,7 +3,8 @@
  *
  * Towers sit on a 3.6-unit grid inside a round plot (radius 29) with three avenues each way and a park in the middle.
  * Tall towers are split into a podium + a slimmer upper volume, leaving a terrace for planting.
- * Every volume becomes one instance of a unit box; plants are instances of a 20-triangle leaf cluster.
+ * Every volume becomes one instance of a unit rounded prism (superellipse section); plants are instances of a
+ * 20-triangle leaf cluster. Street-lamp positions match the ground shader's lamp grid exactly (for the dusk glows).
  */
 
 import type { TierSettings } from "@/lib/quality";
@@ -17,6 +18,8 @@ export const FIELD_EXTENT = 64; // world units covered by the heightfield (-32..
 const CELL = 3.6;
 const AVENUE_EVERY = 5;
 const PARK_RADIUS = 5.6;
+const AVENUE_SPACING = CELL * AVENUE_EVERY; // 18: matches the ground shader
+const LAMP_CELL = 1.8; // matches the ground shader
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -55,7 +58,7 @@ export interface CityData {
   offsets: Float32Array;
   /** per volume: width, height, depth */
   sizes: Float32Array;
-  /** per volume: growth delay, random seed, tower top, green factor */
+  /** per volume: growth delay, random seed, tower top, tower id + 0.9 * green factor */
   seeds: Float32Array;
   leafCount: number;
   /** per leaf cluster: x, y (full-height position), z */
@@ -64,8 +67,11 @@ export interface CityData {
   hosts: Float32Array;
   /** per leaf cluster: size, bloom delay, hue, phase */
   plants: Float32Array;
-  /** RGBA8: R = tower height / MAX_HEIGHT, G = growth delay */
+  /** RGBA8: R = tower height / MAX_HEIGHT, G = growth delay, B = tower id (1-based), A = covered */
   field: Uint8Array;
+  lampCount: number;
+  /** per street lamp: x, y, z */
+  lamps: Float32Array;
 }
 
 function makeTowers(rand: () => number): Tower[] {
@@ -118,6 +124,8 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
   const rand = mulberry32(20310417);
   const towers = makeTowers(rand).slice(0, settings.towers);
   const volumes = towers.flatMap((t) => t.volumes);
+  // unique 1-based tower id per volume (the seed is 8-bit in the field, so neighbours could collide)
+  const ids = towers.flatMap((t, ti) => t.volumes.map(() => ti + 1));
 
   const offsets = new Float32Array(volumes.length * 3);
   const sizes = new Float32Array(volumes.length * 3);
@@ -125,7 +133,8 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
   volumes.forEach((v, i) => {
     offsets.set([v.x, v.base, v.z], i * 3);
     sizes.set([v.w, v.h, v.d], i * 3);
-    seeds.set([v.delay, v.seed, v.top, 0.35 + 0.65 * ((v.seed * 7.31) % 1)], i * 4);
+    // w = tower id (integer part) + green factor * 0.9 (fraction, never near 0 or 1 so floor() stays exact)
+    seeds.set([v.delay, v.seed, v.top, ids[i] + 0.9 * (0.35 + 0.65 * ((v.seed * 7.31) % 1))], i * 4);
   });
 
   await nextTask();
@@ -163,7 +172,7 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
         const floor = Math.floor((v.base + 0.4 + rand() * (v.h - 0.8)) / 0.9);
         const y = floor * 0.9 + 0.18;
         if (y < v.base + 0.2 || y > roofY - 0.2) continue;
-        const along = rand() - 0.5;
+        const along = (rand() - 0.5) * 0.84; // stay off the rounded corners
         const out = 0.1 + rand() * 0.08;
         let x = v.x;
         let z = v.z;
@@ -246,7 +255,7 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
   // ---- heightfield for ground shadows ----
   const field = new Uint8Array(FIELD_SIZE * FIELD_SIZE * 4);
   const texel = FIELD_EXTENT / FIELD_SIZE;
-  for (const v of volumes) {
+  volumes.forEach((v, vi) => {
     const top = v.base + v.h;
     const i0 = Math.max(0, Math.floor((v.x - v.w / 2 + FIELD_EXTENT / 2) / texel));
     const i1 = Math.min(FIELD_SIZE - 1, Math.floor((v.x + v.w / 2 + FIELD_EXTENT / 2) / texel));
@@ -259,9 +268,24 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
         if (h > field[k]) {
           field[k] = h;
           field[k + 1] = Math.round(v.delay * 255);
+          field[k + 2] = ids[vi]; // lets a facade ignore its own tower when marching shadows
           field[k + 3] = 255;
         }
       }
+    }
+  });
+
+  // ---- street lamps: the ground shader's 1.8-unit lamp cells on the avenues, every other cell (checker) ----
+  const lampList: number[] = [];
+  const cells = Math.ceil((PLOT_RADIUS + 2) / LAMP_CELL);
+  const avenueDist = (c: number) => Math.abs(c - Math.floor(c / AVENUE_SPACING + 0.5) * AVENUE_SPACING);
+  for (let i = -cells; i <= cells; i++) {
+    for (let j = -cells; j <= cells; j++) {
+      if ((((i + j) % 2) + 2) % 2 !== 0) continue;
+      const x = (i + 0.5) * LAMP_CELL;
+      const z = (j + 0.5) * LAMP_CELL;
+      if (Math.min(avenueDist(x), avenueDist(z)) > 1.3 || Math.hypot(x, z) > PLOT_RADIUS + 1.5) continue;
+      lampList.push(x, 0.32, z);
     }
   }
 
@@ -276,5 +300,7 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
     hosts,
     plants,
     field,
+    lampCount: lampList.length / 3,
+    lamps: new Float32Array(lampList),
   };
 }

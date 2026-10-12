@@ -1,3 +1,4 @@
+import { PORTFOLIO_URL } from "@/lib/site";
 import MotionToggle from "./MotionToggle";
 
 export default function SiteFooter({ nav }: { nav: readonly { href: string; label: string }[] }) {
@@ -12,7 +13,7 @@ export default function SiteFooter({ nav }: { nav: readonly { href: string; labe
           <ul className="site-footer__nav">
             {nav.map((item) => (
               <li key={item.href}>
-                <a href={item.href.startsWith("#") ? `/${item.href}` : item.href}>{item.label}</a>
+                <a href={item.href.startsWith("#") ? `${process.env.NEXT_PUBLIC_BASE_PATH}/${item.href}` : item.href}>{item.label}</a>
               </li>
             ))}
           </ul>
@@ -20,7 +21,7 @@ export default function SiteFooter({ nav }: { nav: readonly { href: string; labe
         <div className="site-footer__credit">
           <p>
             Design &amp; development by{" "}
-            <a href="https://alhassan-portfolio-sigma.vercel.app" target="_blank" rel="noopener noreferrer">
+            <a href={PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">
               Alhassan Alfarran
             </a>{" "}
             ·{" "}
@@ -32,6 +33,23 @@ export default function SiteFooter({ nav }: { nav: readonly { href: string; labe
           <MotionToggle className="motion-toggle--footer" />
         </div>
       </div>
+      {/* signature close: a giant outline wordmark (decorative) */}
+      <svg className="site-footer__wordmark" viewBox="0 0 1000 232" aria-hidden="true" focusable="false">
+        <text
+          x="500"
+          y="176"
+          textAnchor="middle"
+          fontSize="210"
+          textLength="980"
+          lengthAdjust="spacingAndGlyphs"
+          fill="none"
+          stroke="rgb(143 199 154 / 0.35)"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+        >
+          Skybloom
+        </text>
+      </svg>
     </footer>
   );
 }

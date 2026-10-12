@@ -38,11 +38,20 @@ export default function StoryStage() {
     const stage = stageRef.current;
     const section = stage?.closest<HTMLElement>("[data-story]");
     if (!stage || !section) return;
+    // only the hero tick reads --story: writing it there (not on the section) keeps the style recalc tiny
+    const tick = section.querySelector<HTMLElement>(".hero__tick");
+    let last = "";
 
     const measure = () => {
       const rect = section.getBoundingClientRect();
       const range = Math.max(1, rect.height - window.innerHeight);
       story.target = Math.min(1, Math.max(0, -rect.top / range));
+      // one measurement for both layers: the 2D hero tick reads --story
+      const value = story.target.toFixed(3);
+      if (tick && value !== last) {
+        last = value;
+        tick.style.setProperty("--story", value);
+      }
       requestFrame();
     };
     measure();

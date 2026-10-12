@@ -2,7 +2,8 @@
  * Procedural district layout. Deterministic (seeded), so every visitor sees the same skyline.
  *
  * Towers sit on a 3.6-unit grid inside a round plot (radius 29) with three avenues each way and a park in the middle.
- * Tall towers are split into a podium + a slimmer upper volume, leaving a terrace for planting.
+ * Tall towers are split into a podium + slimmer upper volumes (some with a crown and a mast), leaving terraces for
+ * planting. A third of the towers are drums instead of rounded squares.
  * Every volume becomes one instance of a unit rounded prism (superellipse section); plants are instances of a
  * 20-triangle leaf cluster. Street-lamp positions match the ground shader's lamp grid exactly (for the dusk glows).
  */
@@ -11,6 +12,9 @@ import type { TierSettings } from "@/lib/quality";
 import { nextTask } from "@/lib/schedule";
 
 export const PLOT_RADIUS = 29;
+/** a ring canal around the plot (ground shader water) */
+export const CANAL_INNER = PLOT_RADIUS + 3.2;
+export const CANAL_OUTER = PLOT_RADIUS + 8.5;
 export const MAX_HEIGHT = 44; // used to pack heights into the 8-bit heightfield
 export const FIELD_SIZE = 128; // heightfield texels per side
 export const FIELD_EXTENT = 64; // world units covered by the heightfield (-32..32)
@@ -42,6 +46,7 @@ interface Volume {
   delay: number;
   seed: number;
   top: number; // full height of the whole tower this volume belongs to
+  round: boolean; // drum section instead of the rounded square
 }
 
 interface Tower {
@@ -51,9 +56,22 @@ interface Tower {
   volumes: Volume[];
 }
 
+export interface VolumeSet {
+  count: number;
+  /** per volume: x, base y, z */
+  offsets: Float32Array;
+  /** per volume: width, height, depth */
+  sizes: Float32Array;
+  /** per volume: growth delay, random seed, tower top, tower id + 0.9 * green factor */
+  seeds: Float32Array;
+}
+
 export interface CityData {
   towerCount: number;
   volumeCount: number;
+  /** the same data split by section shape (one draw call each) */
+  square: VolumeSet;
+  round: VolumeSet;
   /** per volume: x, base y, z */
   offsets: Float32Array;
   /** per volume: width, height, depth */
@@ -90,18 +108,34 @@ function makeTowers(rand: () => number): Tower[] {
       let h = 3 + 26 * Math.pow(1 - rn, 1.5) * (0.55 + 0.6 * rand()) + rand() * 2.5;
       const delay = Math.min(1, Math.max(0, rn * 0.78 + rand() * 0.22));
       const seed = rand();
+      // a third of the towers are drums, the rest rounded squares: the skyline reads as many architects, not one
+      const round = rand() < 0.34;
       const volumes: Volume[] = [];
-      if (h > 13 && rand() < 0.72) {
+      const add = (vx: number, vz: number, base: number, vw: number, vd: number, vh: number, isRound = round) =>
+        volumes.push({ x: vx, z: vz, base, w: vw, d: isRound ? vw : vd, h: vh, delay, seed, top: h, round: isRound });
+      if (h > 20 && rand() < 0.55) {
+        // wedding cake: podium, body, slim crown, each set back -> three planted terraces
+        const p1 = h * (0.24 + rand() * 0.1);
+        const p2 = h * (0.62 + rand() * 0.12);
+        add(x, z, 0, w, d, p1);
+        add(x, z, p1, w * 0.78, d * 0.78, p2 - p1);
+        add(x + (rand() - 0.5) * w * 0.12, z + (rand() - 0.5) * d * 0.12, p2, w * 0.52, d * 0.52, h - p2);
+        // the tallest crowns carry a mast
+        if (h > 24 && rand() < 0.5) {
+          const m = 2.5 + rand() * 3;
+          volumes.push({ x, z, base: h, w: 0.22, d: 0.22, h: m, delay, seed, top: h + m, round: true }); // sinks fully underground
+        }
+      } else if (h > 13 && rand() < 0.72) {
         const podium = h * (0.32 + rand() * 0.22);
         const shrink = 0.6 + rand() * 0.18;
-        volumes.push({ x, z, base: 0, w, d, h: podium, delay, seed, top: h });
+        add(x, z, 0, w, d, podium);
         // the upper volume leans towards one corner so terraces differ from tower to tower
         const ox = (rand() - 0.5) * w * (1 - shrink);
         const oz = (rand() - 0.5) * d * (1 - shrink);
-        volumes.push({ x: x + ox, z: z + oz, base: podium, w: w * shrink, d: d * shrink, h: h - podium, delay, seed, top: h });
+        add(x + ox, z + oz, podium, w * shrink, d * shrink, h - podium);
       } else {
         h = Math.max(h, 3.2);
-        volumes.push({ x, z, base: 0, w, d, h, delay, seed, top: h });
+        add(x, z, 0, w, d, h);
       }
       towers.push({ x, z, r, volumes });
     }
@@ -110,10 +144,8 @@ function makeTowers(rand: () => number): Tower[] {
   const spire = towers.reduce((best, t) => (Math.abs(t.r - 9) < Math.abs(best.r - 9) && t.x < 0 && t.z > 0 ? t : best), towers[0]);
   const top = 42;
   const podium = 9;
-  spire.volumes = [
-    { x: spire.x, z: spire.z, base: 0, w: 2.8, d: 2.8, h: podium, delay: 0.05, seed: 0.42, top },
-    { x: spire.x, z: spire.z, base: podium, w: 2.0, d: 2.0, h: top - podium, delay: 0.05, seed: 0.42, top },
-  ];
+  const sv = (base: number, w: number, h: number, round: boolean) => ({ x: spire.x, z: spire.z, base, w, d: w, h, delay: 0.05, seed: 0.42, top, round });
+  spire.volumes = [sv(0, 3.2, podium, false), sv(podium, 2.2, 31 - podium, true), sv(31, 1.6, top - 31, true), { ...sv(top, 0.18, 7, true), top: top + 7 }];
   // most important first (closest to the centre), so lower tiers keep the heart of the skyline
   towers.sort((a, b) => a.r - b.r);
   return towers;
@@ -136,6 +168,16 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
     // w = tower id (integer part) + green factor * 0.9 (fraction, never near 0 or 1 so floor() stays exact)
     seeds.set([v.delay, v.seed, v.top, ids[i] + 0.9 * (0.35 + 0.65 * ((v.seed * 7.31) % 1))], i * 4);
   });
+  const pick = (round: boolean): VolumeSet => {
+    const list = volumes.map((v, i) => [v, i] as const).filter(([v]) => v.round === round).map(([, i]) => i);
+    const set = { count: list.length, offsets: new Float32Array(list.length * 3), sizes: new Float32Array(list.length * 3), seeds: new Float32Array(list.length * 4) };
+    list.forEach((src, k) => {
+      set.offsets.set(offsets.subarray(src * 3, src * 3 + 3), k * 3);
+      set.sizes.set(sizes.subarray(src * 3, src * 3 + 3), k * 3);
+      set.seeds.set(seeds.subarray(src * 4, src * 4 + 4), k * 4);
+    });
+    return set;
+  };
 
   await nextTask();
 
@@ -152,15 +194,17 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
   const density = (target * towerShare) / Math.max(1, surface);
 
   for (const t of towers) {
-    const upper = t.volumes[1];
     for (const v of t.volumes) {
       const roofY = v.base + v.h;
       // roof meadow / terrace (skip the area covered by the upper volume)
-      const roofN = Math.round(v.w * v.d * density);
+      const roofN = v.w < 0.5 ? 0 : Math.round(v.w * v.d * density);
       for (let k = 0; k < roofN; k++) {
         const x = v.x + (rand() - 0.5) * (v.w - 0.3);
         const z = v.z + (rand() - 0.5) * (v.d - 0.3);
-        if (v !== upper && upper && Math.abs(x - upper.x) < upper.w / 2 + 0.1 && Math.abs(z - upper.z) < upper.d / 2 + 0.1) continue;
+        // skip the area covered by the next volume up (the terrace is only the ring around it)
+        const above = t.volumes.find((o) => o !== v && Math.abs(o.base - roofY) < 0.01);
+        if (above && Math.abs(x - above.x) < above.w / 2 + 0.1 && Math.abs(z - above.z) < above.d / 2 + 0.1) continue;
+        if (v.round && Math.hypot((x - v.x) / v.w, (z - v.z) / v.d) > 0.45) continue;
         pushLeaf(x, roofY + 0.12, z, v.delay, 1, v.top, 0.22 + rand() * 0.3, v.delay);
       }
       // facade planters: clusters hanging off the floor slabs, more on some faces than others
@@ -176,7 +220,12 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
         const out = 0.1 + rand() * 0.08;
         let x = v.x;
         let z = v.z;
-        if (face === 0) { x += v.w / 2 + out; z += along * v.d; }
+        if (v.w < 0.5) continue; // masts stay bare
+        if (v.round) {
+          const a = rand() * Math.PI * 2;
+          x += Math.cos(a) * (v.w / 2 + out);
+          z += Math.sin(a) * (v.d / 2 + out);
+        } else if (face === 0) { x += v.w / 2 + out; z += along * v.d; }
         else if (face === 1) { x -= v.w / 2 + out; z += along * v.d; }
         else if (face === 2) { z += v.d / 2 + out; x += along * v.w; }
         else { z -= v.d / 2 + out; x += along * v.w; }
@@ -216,7 +265,7 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
       bloomDelay = Math.min(1, Math.hypot(x, z) / 42); // street trees are planted with the bloom
     } else {
       const a = rand() * Math.PI * 2;
-      const r = PLOT_RADIUS + 3 + Math.pow(rand(), 0.7) * 26;
+      const r = CANAL_OUTER + 1.5 + Math.pow(rand(), 0.7) * 24;
       // keep the meadow in front of the opening camera clear (it starts low, on the +z side)
       const deg = (a * 180) / Math.PI;
       if (deg > 55 && deg < 120 && r < 66) continue;
@@ -292,6 +341,8 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
   return {
     towerCount: towers.length,
     volumeCount: volumes.length,
+    square: pick(false),
+    round: pick(true),
     offsets,
     sizes,
     seeds,

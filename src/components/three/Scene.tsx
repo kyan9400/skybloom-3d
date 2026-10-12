@@ -2,7 +2,7 @@
 
 /*
  * The signature moment: a district that grows as you scroll.
- * Four draw calls (sky, ground, towers, plants; + lamp glows on the high tier), no textures except a tiny generated
+ * Five draw calls (sky, ground, square towers, drum towers, plants; + lamp glows on the high tier), no textures except a tiny generated
  * heightfield, no shadow maps. Towers are rounded (superellipse) prisms with analytic normals and shadow each other
  * through the heightfield; at dusk the district switches on in a wave from the park, with a slow dolly zoom.
  * Render on demand: frames are requested by scroll / pointer, and while the damped scroll value is still settling
@@ -15,7 +15,7 @@ import * as THREE from "three";
 import { TIERS, type Tier, type TierSettings } from "@/lib/quality";
 import { nextTask } from "@/lib/schedule";
 import { story } from "@/lib/story";
-import { buildCity, type CityData, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS } from "./city";
+import { buildCity, CANAL_INNER, CANAL_OUTER, type CityData, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS, type VolumeSet } from "./city";
 import {
   glowFragment,
   glowVertex,
@@ -36,15 +36,29 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/*
+ * Story beats (chapter cards are centred at 0.222 / 0.444 / 0.667 / 0.889 of the scroll):
+ *   0 - 0.05   HERO: the finished district at golden hour, seen from the air (slow drift on the high tier)
+ *   0.05-0.17  it sinks back into the soil, outer towers first, while the camera comes down to eye level
+ *   0.15-0.26  01 Ground: survey lines map the empty plot
+ *   0.27-0.56  02 Rise · 0.48-0.8 03 Bloom · 0.78-0.97 04 Dusk
+ */
+const HERO_END: [number, number] = [0.04, 0.17];
+
 // camera keyframes: [progress, position, look-at]
 const CAMERA_KEYS: [number, [number, number, number], [number, number, number]][] = [
-  [0.0, [8, 1.8, 46], [0, 6.5, 0]],
-  [0.2, [-6, 3.2, 42], [0, 7.5, 0]],
-  [0.42, [-30, 12, 34], [0, 11, 0]],
-  [0.64, [-38, 20, 8], [0, 12, 0]],
-  [0.84, [-14, 30, 44], [0, 9, 0]],
+  [0.0, [-30, 22, 56], [-22, 10, -4]],
+  [0.05, [-27, 20, 53], [-20, 9.5, -4]],
+  [0.17, [2, 5, 50], [0, 6.5, 0]],
+  [0.24, [8, 1.8, 46], [0, 6.5, 0]],
+  [0.36, [-6, 3.2, 42], [0, 7.5, 0]],
+  [0.5, [-30, 12, 34], [0, 11, 0]],
+  [0.66, [-38, 20, 8], [0, 12, 0]],
+  [0.85, [-14, 30, 44], [0, 9, 0]],
   [1.0, [18, 33, 54], [-2, 7, -4]],
 ];
+// portrait screens: the hero copy covers the top half, so frame the district lower and closer to centre
+const HERO_PORTRAIT: [[number, number, number], [number, number, number]] = [[-30, 34, 70], [-4, 16, 0]];
 
 // time of day: morning -> noon -> golden hour -> dusk
 interface SkyKey {
@@ -57,6 +71,16 @@ interface SkyKey {
   ground: string;
   sunDir: [number, number, number];
 }
+// the hero's golden hour: low warm sun from the front-right, glass full of sky
+const HERO_SKY: Omit<SkyKey, "at"> = {
+  zenith: "#6f93c4",
+  horizon: "#ffcf9a",
+  sun: "#ffc98a",
+  sunIntensity: 1.25,
+  fog: "#f1d2ab",
+  ground: "#6c6a48",
+  sunDir: [0.62, 0.3, 0.72],
+};
 const SKY_KEYS: SkyKey[] = [
   { at: 0.0, zenith: "#8cb6d6", horizon: "#f6dcbc", sun: "#ffe2b8", sunIntensity: 1.0, fog: "#e6dcc9", ground: "#6b7458", sunDir: [0.78, 0.32, -0.36] },
   { at: 0.42, zenith: "#5b98cf", horizon: "#d8e6ec", sun: "#fff4e2", sunIntensity: 1.15, fog: "#d2dfe2", ground: "#6f7a5a", sunDir: [0.32, 0.88, -0.28] },
@@ -64,25 +88,29 @@ const SKY_KEYS: SkyKey[] = [
   { at: 1.0, zenith: "#1c1f46", horizon: "#de7658", sun: "#ff7a48", sunIntensity: 0.6, fog: "#5a3d52", ground: "#2c2533", sunDir: [-0.6, 0.035, -0.8] },
 ];
 
+const UP = new THREE.Vector3(0, 1, 0);
+
 /* ------------------------------------------------------------------ geometry */
 
 const SUPER_N = 6; // superellipse exponent: soft rounded corners, flat faces
+// the window grid wraps around the section: perimeter / (width + depth) for each shape
+const PERIM_K = { square: 1.94, round: Math.PI / 2 };
 
 /**
- * Unit rounded prism: section |x|^n + |z|^n = 0.5^n, base at y = 0, top at y = 1, flat top cap, no bottom (never seen).
+ * Unit rounded prism: section |x|^n + |z|^n = 0.5^n (n = 2: a drum), base at y = 0, top at y = 1, flat top cap, no bottom (never seen).
  * Side normals are the analytic gradient (perfectly smooth); the cap ring is duplicated so the parapet edge stays crisp.
  * aU runs 0..1 around the perimeter by arc length, so the window grid wraps evenly around the corners.
  */
-function makePrism(seg: number) {
+function makePrism(seg: number, n: number) {
   const ring: { x: number; z: number; nx: number; nz: number }[] = [];
   for (let i = 0; i <= seg; i++) {
     const a = (i / seg) * Math.PI * 2;
     const c = Math.cos(a);
     const sn = Math.sin(a);
-    const x = 0.5 * Math.sign(c) * Math.pow(Math.abs(c), 2 / SUPER_N);
-    const z = 0.5 * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / SUPER_N);
-    const gx = Math.sign(x) * Math.pow(Math.abs(x), SUPER_N - 1);
-    const gz = Math.sign(z) * Math.pow(Math.abs(z), SUPER_N - 1);
+    const x = 0.5 * Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
+    const z = 0.5 * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / n);
+    const gx = Math.sign(x) * Math.pow(Math.abs(x), n - 1);
+    const gz = Math.sign(z) * Math.pow(Math.abs(z), n - 1);
     const l = Math.hypot(gx, gz) || 1;
     ring.push({ x, z, nx: gx / l, nz: gz / l });
   }
@@ -125,8 +153,8 @@ function makePrism(seg: number) {
   return geo;
 }
 
-function makeTowerGeometry(offsets: Float32Array, sizes: Float32Array, seeds: Float32Array, count: number, seg: number) {
-  const prism = makePrism(seg);
+function makeTowerGeometry({ offsets, sizes, seeds, count }: VolumeSet, seg: number, n: number) {
+  const prism = makePrism(seg, n);
   const geo = new THREE.InstancedBufferGeometry();
   geo.index = prism.index;
   geo.setAttribute("position", prism.getAttribute("position"));
@@ -237,21 +265,25 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     const ground = new THREE.ShaderMaterial({
       vertexShader: groundVertex,
       fragmentShader: groundFragment,
-      uniforms: { ...shared, ...fieldUniforms, uPlotRadius: { value: PLOT_RADIUS } },
+      uniforms: { ...shared, ...fieldUniforms, uPlotRadius: { value: PLOT_RADIUS }, uCanal: { value: new THREE.Vector2(CANAL_INNER, CANAL_OUTER) } },
     });
     // facade self-shadowing (heightfield march) on high + medium only
-    const towers = new THREE.ShaderMaterial({
-      vertexShader: towerVertex,
-      fragmentShader: towerFragment,
-      uniforms: { ...shared, ...fieldUniforms },
-      defines: settings.selfShadow ? { SELF_SHADOW: "" } : {},
-    });
+    const towerMaterial = (perimK: number) =>
+      new THREE.ShaderMaterial({
+        vertexShader: towerVertex,
+        fragmentShader: towerFragment,
+        uniforms: { ...shared, ...fieldUniforms, uPerimK: { value: perimK } },
+        defines: settings.selfShadow ? { SELF_SHADOW: "" } : {},
+      });
+    const towers = towerMaterial(PERIM_K.square);
+    const drums = towerMaterial(PERIM_K.round);
     const plants = new THREE.ShaderMaterial({
       vertexShader: plantVertex,
       fragmentShader: plantFragment,
       uniforms: { ...shared, uSway: { value: 0 } },
     });
-    const towerGeo = makeTowerGeometry(city.offsets, city.sizes, city.seeds, city.volumeCount, settings.seg);
+    const towerGeo = makeTowerGeometry(city.square, settings.seg, SUPER_N);
+    const drumGeo = makeTowerGeometry(city.round, Math.max(16, Math.round(settings.seg * 0.75)), 2);
     // high tier: additive glow sprites over the street lamps (no post-processing)
     const glowGeo = settings.glow ? new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(city.lamps, 3)) : null;
     const glow = settings.glow
@@ -271,6 +303,15 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
 
     const curvePos = new THREE.CatmullRomCurve3(CAMERA_KEYS.map((k) => new THREE.Vector3(...k[1])), false, "centripetal");
     const curveLook = new THREE.CatmullRomCurve3(CAMERA_KEYS.map((k) => new THREE.Vector3(...k[2])), false, "centripetal");
+    const toKey = (k: Omit<SkyKey, "at">) => ({
+      zenith: new THREE.Color(k.zenith),
+      horizon: new THREE.Color(k.horizon),
+      sun: new THREE.Color(k.sun).multiplyScalar(k.sunIntensity),
+      fog: new THREE.Color(k.fog),
+      ground: new THREE.Color(k.ground),
+      sunDir: new THREE.Vector3(...k.sunDir).normalize(),
+    });
+    const heroSky = toKey(HERO_SKY);
     const skyKeys = SKY_KEYS.map((k) => ({
       at: k.at,
       zenith: new THREE.Color(k.zenith),
@@ -280,14 +321,14 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
       ground: new THREE.Color(k.ground),
       sunDir: new THREE.Vector3(...k.sunDir).normalize(),
     }));
-    return { shared, field, sky, ground, towers, plants, glow, towerGeo, plantGeo, glowGeo, groundGeo, skyGeo, curvePos, curveLook, skyKeys };
+    return { shared, field, sky, ground, towers, drums, plants, glow, towerGeo, drumGeo, plantGeo, glowGeo, groundGeo, skyGeo, curvePos, curveLook, skyKeys, heroSky };
   }, [city, settings]);
 
   // free GPU memory when the scene goes away
   useEffect(
     () => () => {
       const a = assets;
-      [a.sky, a.ground, a.towers, a.plants, a.glow, a.towerGeo, a.plantGeo, a.glowGeo, a.groundGeo, a.skyGeo, a.field].forEach((o) => o?.dispose());
+      [a.sky, a.ground, a.towers, a.drums, a.plants, a.glow, a.towerGeo, a.drumGeo, a.plantGeo, a.glowGeo, a.groundGeo, a.skyGeo, a.field].forEach((o) => o?.dispose());
     },
     [assets],
   );
@@ -298,6 +339,9 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     look: new THREE.Vector3(),
     offset: new THREE.Vector3(),
     current: story.target,
+    orbit: 0,
+    heroPos: new THREE.Vector3(),
+    heroLook: new THREE.Vector3(),
     px: 0,
     py: 0,
     time: 0,
@@ -359,14 +403,17 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     }
     const p = s.current;
     const u = assets.shared;
-    u.uGrow.value = smooth(0.1, 0.56, p);
-    u.uBloom.value = smooth(0.4, 0.8, p);
-    u.uDusk.value = smooth(0.76, 0.97, p);
-    u.uSurvey.value = smooth(0.02, 0.12, p);
+    // hero: the finished district; scrolling on, it sinks back into the soil (reverse ripple) and the story starts
+    const hero = 1 - smooth(HERO_END[0], HERO_END[1], p);
+    u.uGrow.value = Math.max(smooth(0.27, 0.56, p), hero);
+    u.uBloom.value = Math.max(smooth(0.48, 0.8, p), hero);
+    u.uDusk.value = smooth(0.78, 0.97, p);
+    u.uSurvey.value = smooth(0.15, 0.26, p);
     u.uExposure.value = 1 + 0.15 * u.uDusk.value; // lit windows roll off softly at dusk
+    u.uFogDensity.value = 0.0085 * (1 - 0.5 * hero); // the hero shot is crisp; the story keeps its morning haze
 
     // sky / light keyframes
-    const tod = Math.min(1, p / 0.96);
+    const tod = Math.min(1, Math.max(0, (p - HERO_END[1]) / (0.96 - HERO_END[1])));
     const keys = assets.skyKeys;
     let i = 0;
     while (i < keys.length - 2 && tod > keys[i + 1].at) i++;
@@ -379,6 +426,15 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     u.uFogColor.value.lerpColors(a.fog, b.fog, k);
     u.uGroundColor.value.lerpColors(a.ground, b.ground, k);
     u.uSunDir.value.lerpVectors(a.sunDir, b.sunDir, k).normalize();
+    if (hero > 0) {
+      const h = assets.heroSky;
+      u.uZenith.value.lerp(h.zenith, hero);
+      u.uHorizon.value.lerp(h.horizon, hero);
+      u.uSunColor.value.lerp(h.sun, hero);
+      u.uFogColor.value.lerp(h.fog, hero);
+      u.uGroundColor.value.lerp(h.ground, hero);
+      u.uSunDir.value.lerp(h.sunDir, hero).normalize();
+    }
 
     // camera path
     let c = 0;
@@ -388,6 +444,18 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     assets.curvePos.getPoint(t, s.pos);
     assets.curveLook.getPoint(t, s.look);
     if (portrait) s.pos.sub(s.look).multiplyScalar(1.3).add(s.look);
+    if (hero > 0) {
+      // the opening shot: a slow drift around the district (high tier, full motion), its own framing on phones
+      if (portrait) {
+        s.heroPos.set(...HERO_PORTRAIT[0]);
+        s.heroLook.set(...HERO_PORTRAIT[1]);
+        const k = smooth(0, 1, hero);
+        s.pos.lerp(s.heroPos, k);
+        s.look.lerp(s.heroLook, k);
+      }
+      const yaw = Math.sin(s.orbit * 0.11) * 0.16 * hero;
+      if (yaw !== 0) s.pos.sub(s.look).applyAxisAngle(UP, yaw).add(s.look);
+    }
 
     // the final key "breathes" as the district lights up: pull back 10% while narrowing the lens 6 degrees
     const dolly = smooth(0.86, 1.0, p);
@@ -422,11 +490,13 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
     // wind in the gardens: an autonomous effect, so it keeps the loop alive (high tier, full motion only)
     const swaying = settings.sway && !reduced && u.uBloom.value > 0.02;
     if (swaying) s.time += dt;
+    const drifting = settings.sway && !reduced && hero > 0.001;
+    if (drifting) s.orbit += dt;
     u.uTime.value = s.time;
     (assets.plants.uniforms.uSway as { value: number }).value = settings.sway && !reduced ? 1 : 0;
 
     const settling = s.current !== story.target;
-    if (story.visible && !document.hidden && (settling || pointerMoving || swaying)) invalidate();
+    if (story.visible && !document.hidden && (settling || pointerMoving || swaying || drifting)) invalidate();
   });
 
   return (
@@ -434,6 +504,7 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
       <mesh ref={skyRef} geometry={assets.skyGeo} material={assets.sky} frustumCulled={false} renderOrder={-1} />
       <mesh geometry={assets.groundGeo} material={assets.ground} position={[0, -0.005, 0]} />
       <mesh geometry={assets.towerGeo} material={assets.towers} frustumCulled={false} />
+      <mesh geometry={assets.drumGeo} material={assets.drums} frustumCulled={false} />
       <mesh geometry={assets.plantGeo} material={assets.plants} frustumCulled={false} />
       {assets.glow && assets.glowGeo ? <points geometry={assets.glowGeo} material={assets.glow} frustumCulled={false} renderOrder={1} /> : null}
     </>

@@ -4,7 +4,8 @@
  *   uGrow   0..1 towers rise out of the ground (per-tower delay -> outward ripple)
  *   uBloom  0..1 gardens climb the facades and leaf clusters open
  *   uDusk   0..1 the district switches on: windows and lamps light up in a wave from the park
- *   sky / sun / fog colours come from one time-of-day value on the CPU.
+ *   sky / sun / fog colours come from one time-of-day value on the CPU (blended with the hero's golden hour).
+ *   A ring canal around the plot mirrors the sky (ground shader).
  */
 
 const common = /* glsl */ `
@@ -128,6 +129,7 @@ void main() {
 
 export const towerVertex = /* glsl */ `
 ${common}
+uniform float uPerimK; // perimeter / (width + depth) of this section shape
 attribute float aU;
 attribute vec3 aOffset;
 attribute vec3 aSize;
@@ -155,7 +157,7 @@ void main() {
   // window grid wraps around the rounded corners: perimeter snapped to whole 1.5 units (two 0.75 bays,
   // one storefront bay) so the seam is invisible on every floor
   vU = aU;
-  vPerim = max(1.5, floor(2.0 * (aSize.x + aSize.z) * 0.97 / 1.5 + 0.5) * 1.5);
+  vPerim = max(1.5, floor((aSize.x + aSize.z) * uPerimK / 1.5 + 0.5) * 1.5);
   vBase = aOffset.y;
   vTop = aOffset.y + aSize.y;
   gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
@@ -217,8 +219,8 @@ void main() {
     vec2 g = vec2(u, y) / bay;
     vec2 cell = floor(g);
     vec2 f = fract(g);
-    float mw = mix(0.05, 0.025, lobby);
-    float slabH = mix(0.1, 0.05, lobby);
+    float mw = mix(0.085, 0.03, lobby); // chunky timber mullions: the facades read as wood and glass
+    float slabH = mix(0.15, 0.06, lobby);
     float mullion = 1.0 - smoothstep(mw, mw + 0.03, min(f.x, 1.0 - f.x));
     float slab = 1.0 - smoothstep(slabH, slabH + 0.04, f.y);
     float parapet = step(vTop - 0.12, y);
@@ -255,7 +257,7 @@ void main() {
 
     // timber: vertical grain, a lighter parapet band on top
     float grain = vnoise(vec2(u * 40.0, y * 2.0));
-    vec3 wood = mix(vec3(0.50, 0.38, 0.26), vec3(0.68, 0.55, 0.40), parapet) * (0.92 + 0.16 * grain);
+    vec3 wood = mix(vec3(0.56, 0.38, 0.22), vec3(0.72, 0.56, 0.38), parapet) * (0.92 + 0.16 * grain);
     col = mix(glass, wood * (sun * ndl * 0.9 + ambient + rim), frame);
     // a thin shadow line under every slab so the floors read in depth
     col *= 1.0 - 0.35 * smoothstep(0.955, 1.0, f.y) * (1.0 - parapet);
@@ -368,6 +370,7 @@ export const groundFragment = /* glsl */ `
 ${common}
 ${field}
 uniform float uPlotRadius;
+uniform vec2 uCanal; // inner / outer radius of the ring canal
 varying vec3 vWorld;
 
 void main() {
@@ -411,6 +414,28 @@ void main() {
   ao += step(0.05, towerHeight(p - vec2(0.0, 0.6)));
   float sun = max(uSunDir.y, 0.0) * (1.0 - shade * 0.85);
   col *= uSunColor * sun * 1.05 + hemi(vec3(0.0, 1.0, 0.0)) * 0.5 * (1.0 - ao * 0.09);
+
+  // the ring canal: rippled water that mirrors the sky, sun glitter by day, the city's lights at dusk
+  float canal = smoothstep(uCanal.x, uCanal.x + 0.35, r) * (1.0 - smoothstep(uCanal.y - 0.35, uCanal.y, r));
+  if (canal > 0.0) {
+    vec3 V = normalize(cameraPosition - vWorld);
+    vec2 rip = vec2(vnoise(p * 1.7 + uTime * 0.35), vnoise(p * 1.7 - uTime * 0.3 + 5.0)) - 0.5;
+    rip += (vec2(vnoise(p * 6.0 - uTime * 0.6), vnoise(p * 6.0 + 9.0 + uTime * 0.5)) - 0.5) * 0.5;
+    vec3 wn = normalize(vec3(rip.x * 0.16, 1.0, rip.y * 0.16));
+    vec3 R = reflect(-V, wn);
+    vec3 refl = skyColor(normalize(vec3(R.x, max(R.y, 0.02), R.z)));
+    float fres = 0.06 + 0.94 * pow(1.0 - max(dot(wn, V), 0.0), 5.0);
+    vec3 deep = vec3(0.04, 0.11, 0.12) * (hemi(wn) * 0.7 + uSunColor * 0.25);
+    vec3 water = mix(deep, refl, clamp(fres + 0.3, 0.0, 1.0));
+    water += uSunColor * (pow(max(dot(R, uSunDir), 0.0), 260.0) * 4.0 + pow(max(dot(R, uSunDir), 0.0), 24.0) * 0.12);
+    // dusk: warm light from the windows smeared across the water, broken up by the ripples
+    float streak = smoothstep(0.55, 1.0, vnoise(vec2(atan(p.y, p.x) * 46.0, r * 0.5 + rip.x * 5.0)));
+    water += vec3(1.0, 0.64, 0.34) * streak * smoothstep(0.3, 0.9, uDusk) * (1.0 - smoothstep(uCanal.x, uCanal.y + 2.0, r)) * 0.9;
+    col = mix(col, water, canal);
+  }
+  // pale stone embankments on both banks
+  float bank = max(1.0 - smoothstep(0.0, 0.3, abs(r - uCanal.x)), 1.0 - smoothstep(0.0, 0.3, abs(r - uCanal.y)));
+  col = mix(col, vec3(0.66, 0.6, 0.5) * (uSunColor * max(uSunDir.y, 0.0) + hemi(vec3(0.0, 1.0, 0.0)) * 0.55), bank * 0.85);
 
   vec3 fern = vec3(0.4, 0.85, 0.55);
 

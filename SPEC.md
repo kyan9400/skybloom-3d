@@ -24,6 +24,12 @@ Tone: calm, confident, optimistic. Botanical editorial — a printed annual repo
 ## Signature 3D moment
 **"The district grows."** A sticky full-viewport canvas behind the hero and four chapters (≈ 460svh of scroll).
 
+Opening shot: the hero shows the finished district at golden hour from the air (city framed right of the headline,
+on phones the landmark spire rises above it; a slow drift on the high tier). Scrolling on, the district sinks back into
+the soil, outer towers first, and the story starts from the empty plot. Towers mix rounded squares and drums, with
+stepped three-tier towers and masts on the tallest crowns; a ring canal around the plot mirrors the sky and, at dusk,
+the city's lights.
+
 Technique (all procedural, zero downloaded assets):
 - **Towers**: one instanced mesh of a unit rounded prism (superellipse section, n = 6, analytic normals, pivot at the
   base; 48/32/16 perimeter points by tier). Towers shadow each other via an 8-step heightfield march (high/medium). Per-instance attributes: footprint, target height,

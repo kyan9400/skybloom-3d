@@ -19,12 +19,18 @@ export interface TierSettings {
   selfShadow: boolean;
   /** additive lamp glows at dusk (one extra draw call) */
   glow: boolean;
+  /** scanned park trees (Poly Haven island_tree_02, instanced) */
+  parkTrees: number;
+  /** scanned street trees: every n-th planting spot along the avenues */
+  avenueStride: number;
+  /** scanned shrubs (Poly Haven shrub_02) on roofs and terraces */
+  shrubs: number;
 }
 
 export const TIERS: Record<Tier, TierSettings> = {
-  high: { dprCap: 2, antialias: true, towers: 150, leaves: 7000, sway: true, seg: 48, selfShadow: true, glow: true },
-  medium: { dprCap: 1.5, antialias: true, towers: 100, leaves: 4000, sway: false, seg: 32, selfShadow: true, glow: false },
-  low: { dprCap: 1, antialias: false, towers: 60, leaves: 1600, sway: false, seg: 16, selfShadow: false, glow: false },
+  high: { dprCap: 2, antialias: true, towers: 150, leaves: 7000, sway: true, seg: 48, selfShadow: true, glow: true, parkTrees: 30, avenueStride: 1, shrubs: 900 },
+  medium: { dprCap: 1.5, antialias: true, towers: 100, leaves: 4000, sway: false, seg: 32, selfShadow: true, glow: false, parkTrees: 22, avenueStride: 2, shrubs: 420 },
+  low: { dprCap: 1, antialias: false, towers: 60, leaves: 1600, sway: false, seg: 16, selfShadow: false, glow: false, parkTrees: 14, avenueStride: 3, shrubs: 150 },
 };
 
 export interface GpuProbe {

@@ -2,8 +2,9 @@
 
 /*
  * The signature moment: a district that grows as you scroll.
- * Five draw calls (sky, ground, square towers, drum towers, plants; + lamp glows on the high tier), no textures except a tiny generated
- * heightfield, no shadow maps. Towers are rounded (superellipse) prisms with analytic normals and shadow each other
+ * Eight draw calls (sky, ground, square towers, drum towers, leaf clusters, scanned tree trunks, scanned tree crowns,
+ * scanned roof shrubs; + lamp glows on the high tier), no shadow maps. The only textures are a tiny generated heightfield
+ * and the three Poly Haven scan textures (one shared shader program for all scanned greenery). Towers are rounded (superellipse) prisms with analytic normals and shadow each other
  * through the heightfield; at dusk the district switches on in a wave from the park, with a slow dolly zoom.
  * Render on demand: frames are requested by scroll / pointer, and while the damped scroll value is still settling
  * or the wind sway is running (high tier, full motion, on screen).
@@ -15,7 +16,8 @@ import * as THREE from "three";
 import { TIERS, type Tier, type TierSettings } from "@/lib/quality";
 import { nextTask } from "@/lib/schedule";
 import { story } from "@/lib/story";
-import { buildCity, CANAL_INNER, CANAL_OUTER, type CityData, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS, type VolumeSet } from "./city";
+import { buildCity, CANAL_INNER, CANAL_OUTER, type CityData, FIELD_EXTENT, FIELD_SIZE, MAX_HEIGHT, PLOT_RADIUS, type ScanSet, type VolumeSet } from "./city";
+import { type Greenery, loadGreenery, type ScanPart } from "./greenery";
 import {
   glowFragment,
   glowVertex,
@@ -23,6 +25,8 @@ import {
   groundVertex,
   plantFragment,
   plantVertex,
+  scanFragment,
+  scanVertex,
   skyFragment,
   skyVertex,
   towerFragment,
@@ -178,6 +182,25 @@ function makePlantGeometry(anchors: Float32Array, hosts: Float32Array, plants: F
   return geo;
 }
 
+/** one instanced draw per scanned sub-mesh: the scan's own geometry + the leaf-cluster instance layout */
+function makeScanGeometry(part: ScanPart, set: ScanSet) {
+  const src = part.geometry;
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.index = src.index;
+  geo.setAttribute("position", src.getAttribute("position"));
+  geo.setAttribute("normal", src.getAttribute("normal"));
+  geo.setAttribute("uv", src.getAttribute("uv"));
+  geo.setAttribute("aAnchor", new THREE.InstancedBufferAttribute(set.anchors, 3));
+  geo.setAttribute("aHost", new THREE.InstancedBufferAttribute(set.hosts, 3));
+  geo.setAttribute("aPlant", new THREE.InstancedBufferAttribute(set.plants, 4));
+  geo.instanceCount = set.count;
+  return geo;
+}
+
+// canopy centres of the scans in model space (round the foliage shading)
+const TREE_CROWN: [number, number, number] = [0.02, 2.33, 0.95];
+const SHRUB_CROWN: [number, number, number] = [0, 0.6, 0];
+
 /* ------------------------------------------------------------------ adaptive resolution */
 
 // Frame times are only measured between consecutive drawn frames (render on demand leaves long gaps).
@@ -217,12 +240,13 @@ function useAdaptiveDpr(cap: number) {
 interface DistrictProps {
   settings: TierSettings;
   city: CityData;
+  greenery: Greenery | null;
   cap: number;
   reducedMotion: boolean;
   onReady: () => void;
 }
 
-function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps) {
+function District({ settings, city, greenery, cap, reducedMotion, onReady }: DistrictProps) {
   const { gl, scene, camera, invalidate, size } = useThree();
   const skyRef = useRef<THREE.Mesh>(null);
   const reducedRef = useRef(reducedMotion);
@@ -277,11 +301,35 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
       });
     const towers = towerMaterial(PERIM_K.square);
     const drums = towerMaterial(PERIM_K.round);
+    const sway = { value: 0 };
     const plants = new THREE.ShaderMaterial({
       vertexShader: plantVertex,
       fragmentShader: plantFragment,
-      uniforms: { ...shared, uSway: { value: 0 } },
+      uniforms: { ...shared, uSway: sway },
     });
+    // scanned greenery: bark and foliage share one program (only uniforms differ)
+    const scanMaterial = (part: ScanPart, leaf: boolean, crown: [number, number, number]) =>
+      new THREE.ShaderMaterial({
+        vertexShader: scanVertex,
+        fragmentShader: scanFragment,
+        uniforms: {
+          ...shared,
+          uSway: sway,
+          uLeaf: { value: leaf ? 1 : 0 },
+          uCrown: { value: new THREE.Vector3(...crown) },
+          uMap: { value: part.map },
+          uMapSize: { value: (part.map.image as { width?: number } | null)?.width ?? 1024 },
+        },
+        side: THREE.DoubleSide,
+      });
+    const scans =
+      greenery && city.trees && city.shrubs
+        ? [
+            { geo: makeScanGeometry(greenery.trunk, city.trees), mat: scanMaterial(greenery.trunk, false, TREE_CROWN) },
+            { geo: makeScanGeometry(greenery.leaves, city.trees), mat: scanMaterial(greenery.leaves, true, TREE_CROWN) },
+            { geo: makeScanGeometry(greenery.shrub, city.shrubs), mat: scanMaterial(greenery.shrub, true, SHRUB_CROWN) },
+          ]
+        : [];
     const towerGeo = makeTowerGeometry(city.square, settings.seg, SUPER_N);
     const drumGeo = makeTowerGeometry(city.round, Math.max(16, Math.round(settings.seg * 0.75)), 2);
     // high tier: additive glow sprites over the street lamps (no post-processing)
@@ -321,16 +369,30 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
       ground: new THREE.Color(k.ground),
       sunDir: new THREE.Vector3(...k.sunDir).normalize(),
     }));
-    return { shared, field, sky, ground, towers, drums, plants, glow, towerGeo, drumGeo, plantGeo, glowGeo, groundGeo, skyGeo, curvePos, curveLook, skyKeys, heroSky };
-  }, [city, settings]);
+    return { shared, field, sky, ground, towers, drums, plants, scans, glow, towerGeo, drumGeo, plantGeo, glowGeo, groundGeo, skyGeo, curvePos, curveLook, skyKeys, heroSky };
+  }, [city, settings, greenery]);
 
   // free GPU memory when the scene goes away
   useEffect(
     () => () => {
       const a = assets;
       [a.sky, a.ground, a.towers, a.drums, a.plants, a.glow, a.towerGeo, a.drumGeo, a.plantGeo, a.glowGeo, a.groundGeo, a.skyGeo, a.field].forEach((o) => o?.dispose());
+      a.scans.forEach((scan) => {
+        scan.geo.dispose();
+        scan.mat.dispose();
+      });
     },
     [assets],
+  );
+  useEffect(
+    () => () => {
+      if (!greenery) return;
+      [greenery.trunk, greenery.leaves, greenery.shrub].forEach((part) => {
+        part.geometry.dispose();
+        part.map.dispose();
+      });
+    },
+    [greenery],
   );
 
   // reusable scratch objects: nothing is allocated per frame
@@ -506,6 +568,9 @@ function District({ settings, city, cap, reducedMotion, onReady }: DistrictProps
       <mesh geometry={assets.towerGeo} material={assets.towers} frustumCulled={false} />
       <mesh geometry={assets.drumGeo} material={assets.drums} frustumCulled={false} />
       <mesh geometry={assets.plantGeo} material={assets.plants} frustumCulled={false} />
+      {assets.scans.map((scan, i) => (
+        <mesh key={i} geometry={scan.geo} material={scan.mat} frustumCulled={false} />
+      ))}
       {assets.glow && assets.glowGeo ? <points geometry={assets.glowGeo} material={assets.glow} frustumCulled={false} renderOrder={1} /> : null}
     </>
   );
@@ -523,11 +588,17 @@ export interface SceneProps {
 export default function Scene({ tier, reducedMotion, onReady, onLost }: SceneProps) {
   const settings = TIERS[tier];
   const cap = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, settings.dprCap);
-  // build the district data first, in small steps, before the WebGL context is even created
-  const [built, setBuilt] = useState<{ settings: TierSettings; city: CityData } | null>(null);
+  // build the district data first, in small steps, before the WebGL context is even created; the scanned greenery
+  // downloads in parallel (if it fails, the district falls back to leaf-cluster trees everywhere)
+  const [built, setBuilt] = useState<{ settings: TierSettings; city: CityData; greenery: Greenery | null } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    buildCity(settings).then((city) => !cancelled && setBuilt({ settings, city }));
+    const scans = loadGreenery().catch(() => null);
+    (async () => {
+      const [city, greenery] = await Promise.all([buildCity(settings, true), scans]);
+      const final = greenery ? city : await buildCity(settings, false);
+      if (!cancelled) setBuilt({ settings, city: final, greenery });
+    })();
     return () => {
       cancelled = true;
     };
@@ -547,7 +618,7 @@ export default function Scene({ tier, reducedMotion, onReady, onLost }: ScenePro
         });
       }}
     >
-      <District settings={settings} city={built.city} cap={cap} reducedMotion={reducedMotion} onReady={onReady} />
+      <District settings={settings} city={built.city} greenery={built.greenery} cap={cap} reducedMotion={reducedMotion} onReady={onReady} />
     </Canvas>
   );
 }

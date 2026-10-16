@@ -6,6 +6,9 @@
  * planting. A third of the towers are drums instead of rounded squares.
  * Every volume becomes one instance of a unit rounded prism (superellipse section); plants are instances of a
  * 20-triangle leaf cluster. Street-lamp positions match the ground shader's lamp grid exactly (for the dusk glows).
+ * With the scanned greenery loaded (Poly Haven CC0), the park and avenue trees and part of the roof gardens become
+ * instances of real scanned trees and shrubs; the forest ring far outside the plot and the facade planters stay leaf
+ * clusters (the cheap far LOD).
  */
 
 import type { TierSettings } from "@/lib/quality";
@@ -24,6 +27,14 @@ const AVENUE_EVERY = 5;
 const PARK_RADIUS = 5.6;
 const AVENUE_SPACING = CELL * AVENUE_EVERY; // 18: matches the ground shader
 const LAMP_CELL = 1.8; // matches the ground shader
+/** the stretch of forest in the foreground of the hero shot (camera ~(-30, 22, 56), looking at the park) */
+function nearHero(x: number, z: number) {
+  const dx = x + 30;
+  const dz = z - 56;
+  const d = Math.hypot(dx, dz, 22);
+  // in front of the camera (towards the district) and close enough to read as single trees
+  return d < 62 && (dx * 0.13 - dz * 0.99) / Math.hypot(dx, dz) > 0.35;
+}
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -66,6 +77,27 @@ export interface VolumeSet {
   seeds: Float32Array;
 }
 
+/** instances of one scanned model: same layout as the leaf clusters, so they grow and bloom with them */
+export interface ScanSet {
+  count: number;
+  /** x, y (full-height position), z */
+  anchors: Float32Array;
+  /** host growth delay, on-tower flag, host tower top */
+  hosts: Float32Array;
+  /** scale, bloom delay, tint, rotation (0..1) */
+  plants: Float32Array;
+}
+
+function toScanSet(list: number[][]): ScanSet {
+  const set = { count: list.length, anchors: new Float32Array(list.length * 3), hosts: new Float32Array(list.length * 3), plants: new Float32Array(list.length * 4) };
+  list.forEach((l, i) => {
+    set.anchors.set(l.slice(0, 3), i * 3);
+    set.hosts.set(l.slice(3, 6), i * 3);
+    set.plants.set(l.slice(6, 10), i * 4);
+  });
+  return set;
+}
+
 export interface CityData {
   towerCount: number;
   volumeCount: number;
@@ -90,6 +122,9 @@ export interface CityData {
   lampCount: number;
   /** per street lamp: x, y, z */
   lamps: Float32Array;
+  /** scanned street + park trees and roof shrubs (null without the scanned greenery) */
+  trees: ScanSet | null;
+  shrubs: ScanSet | null;
 }
 
 function makeTowers(rand: () => number): Tower[] {
@@ -152,7 +187,7 @@ function makeTowers(rand: () => number): Tower[] {
 }
 
 /** Builds the district in a few steps, handing the main thread back between them (no single long task). */
-export async function buildCity(settings: TierSettings): Promise<CityData> {
+export async function buildCity(settings: TierSettings, scans = false): Promise<CityData> {
   const rand = mulberry32(20310417);
   const towers = makeTowers(rand).slice(0, settings.towers);
   const volumes = towers.flatMap((t) => t.volumes);
@@ -188,6 +223,8 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
     leaves.push([x, y, z, hostDelay, onTower, top, size, bloomDelay, rand(), rand()]);
 
   const target = settings.leaves * 2;
+  // roof spots that may become scanned shrubs (picked after the loop, deterministically)
+  const roofSpots: [number, number, number, number, number, number][] = [];
   const towerShare = 0.78;
   let surface = 0;
   for (const v of volumes) surface += v.w * v.d + (v.w + v.d) * 2 * v.h * 0.35;
@@ -205,7 +242,9 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
         const above = t.volumes.find((o) => o !== v && Math.abs(o.base - roofY) < 0.01);
         if (above && Math.abs(x - above.x) < above.w / 2 + 0.1 && Math.abs(z - above.z) < above.d / 2 + 0.1) continue;
         if (v.round && Math.hypot((x - v.x) / v.w, (z - v.z) / v.d) > 0.45) continue;
-        pushLeaf(x, roofY + 0.12, z, v.delay, 1, v.top, 0.22 + rand() * 0.3, v.delay);
+        const size = 0.22 + rand() * 0.3;
+        if (scans && v.w > 1.1) roofSpots.push([x, roofY, z, v.delay, v.top, size]);
+        else pushLeaf(x, roofY + 0.12, z, v.delay, 1, v.top, size, v.delay);
       }
       // facade planters: clusters hanging off the floor slabs, more on some faces than others
       const faceGreen = [rand(), rand(), rand(), rand()].map((g) => 0.25 + g * 0.75);
@@ -236,12 +275,56 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
 
   await nextTask();
 
-  // ground: park trees, avenue rows and the forest ring around the plot
-  const groundN = target * (1 - towerShare);
+  // roof shrubs: a shuffled share of the roof spots, the rest stay leaf clusters
+  const shrubList: number[][] = [];
+  for (let i = roofSpots.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [roofSpots[i], roofSpots[j]] = [roofSpots[j], roofSpots[i]];
+  }
+  roofSpots.forEach(([x, y, z, delay, top, size], i) => {
+    if (i < settings.shrubs) shrubList.push([x, y, z, delay, 1, top, 0.5 + size * 0.7, delay, rand(), rand()]);
+    else pushLeaf(x, y + 0.12, z, delay, 1, top, size, delay);
+  });
+
+  // scanned trees: park groves + rows on both sides of every avenue (every n-th spot on the lower tiers)
+  const treeList: number[][] = [];
+  if (scans) {
+    let tries = 0;
+    while (treeList.length < settings.parkTrees && tries++ < 4000) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.sqrt(rand()) * (PARK_RADIUS - 0.9);
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      if (treeList.some((t) => Math.hypot(t[0] - x, t[2] - z) < 1.35)) continue;
+      treeList.push([x, 0, z, 0, 0, 0, 0.5 + rand() * 0.2, -0.6, rand(), rand()]);
+    }
+    const reach = Math.floor(PLOT_RADIUS / 1.6);
+    let spot = 0;
+    for (const avenue of [-AVENUE_SPACING, 0, AVENUE_SPACING]) {
+      for (const side of [-1.15, 1.15]) {
+        for (let k = -reach; k <= reach; k++) {
+          const along = k * 1.6;
+          // keep the crossings clear
+          if (Math.abs(Math.abs(along) - AVENUE_SPACING) < 1.9 || Math.abs(along) < 1.9) continue;
+          for (const swap of [false, true]) {
+            const x = swap ? along : avenue + side;
+            const z = swap ? avenue + side : along;
+            const r = Math.hypot(x, z);
+            if (r > PLOT_RADIUS - 0.6 || r < PARK_RADIUS + 0.6) continue;
+            if (spot++ % settings.avenueStride !== 0) continue;
+            treeList.push([x, 0, z, 0, 0, 0, 0.36 + rand() * 0.1, Math.min(1, r / 42), rand(), rand()]);
+          }
+        }
+      }
+    }
+  }
+
+  // ground: park trees, avenue rows and the forest ring around the plot (with the scans: only the forest ring)
+  const groundN = target * (1 - towerShare) * (scans ? 0.45 : 1);
   let placed = 0;
   let guard = 0;
   while (placed < groundN && guard++ < groundN * 20) {
-    const zone = rand();
+    const zone = scans ? 0.55 + rand() * 0.45 : rand();
     let x: number;
     let z: number;
     let scale: number;
@@ -273,6 +356,19 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
       z = Math.sin(a) * r;
       scale = 1.25 + rand() * 0.6;
       bloomDelay = -1; // the surrounding forest is always there
+      // LOD: the stretch of forest in front of the hero camera is scanned trees, the rest of the ring leaf clusters
+      if (scans && nearHero(x, z)) {
+        if (treeList.some((t) => t[7] < 0 && Math.hypot(t[0] - x, t[2] - z) < 1.5)) continue;
+        treeList.push([x, 0, z, 0, 0, 0, 0.72 + (scale - 1.25) * 0.5, -1, rand(), rand()]);
+        // a scanned crown is airier than a stack of leaf clusters: plant a neighbour to keep the woodland closed
+        const b = rand() * Math.PI * 2;
+        const nx = x + Math.cos(b) * 1.7;
+        const nz = z + Math.sin(b) * 1.7;
+        if (Math.hypot(nx, nz) > CANAL_OUTER + 1.2 && !treeList.some((t) => t[7] < 0 && Math.hypot(t[0] - nx, t[2] - nz) < 1.4))
+          treeList.push([nx, 0, nz, 0, 0, 0, 0.62 + rand() * 0.2, -1, rand(), rand()]);
+        placed += 2;
+        continue;
+      }
     }
     const layers = 2 + Math.floor(rand() * 2);
     for (let l = 0; l < layers; l++) {
@@ -353,5 +449,7 @@ export async function buildCity(settings: TierSettings): Promise<CityData> {
     field,
     lampCount: lampList.length / 3,
     lamps: new Float32Array(lampList),
+    trees: scans ? toScanSet(treeList) : null,
+    shrubs: scans ? toScanSet(shrubList) : null,
   };
 }

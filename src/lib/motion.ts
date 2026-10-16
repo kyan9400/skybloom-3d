@@ -1,7 +1,7 @@
 /*
  * Motion preference.
- * The OS "reduce motion" setting is respected by default, but many Windows users switch animations off for speed,
- * not comfort, so visitors can turn full motion back on. The choice is remembered in localStorage and
+ * Every first visit starts in full motion (many Windows users switch OS animations off for speed, not comfort);
+ * the "Reduce motion" toggle turns it down. The choice is remembered in localStorage and
  * ?motion=full | ?motion=reduced in the URL overrides everything (handy for testing).
  */
 
@@ -9,7 +9,6 @@ const KEY = "skybloom-motion";
 type Listener = () => void;
 
 let reduced: boolean | null = null;
-let systemReduced = false;
 const listeners = new Set<Listener>();
 
 function readChoice(): "full" | "reduced" | null {
@@ -32,9 +31,8 @@ function applyClass(value: boolean) {
 /** Client only. Computed once, then kept in sync by setReducedMotion(). */
 export function getReducedMotion(): boolean {
   if (reduced === null) {
-    systemReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const choice = readChoice();
-    reduced = choice === "full" ? false : choice === "reduced" ? true : systemReduced;
+    reduced = choice === "full" ? false : choice === "reduced";
     applyClass(reduced);
   }
   return reduced;

@@ -64,7 +64,7 @@ Quality tiers (decided before the Canvas exists, from `WEBGL_debug_renderer_info
 Plus an idle-aware adaptive-DPR controller (measures only consecutive drawn frames, so render-on-demand gaps are not mistaken for slow frames — the same approach as the Apex Motors reference).
 
 Reduced motion: scroll-linked growth still works but cuts directly to the scroll position (no damping), no wind
-sway, no idle camera drift. A "Turn on full motion" toggle in the header (remembered in localStorage,
+sway, no idle camera drift. Full motion is the default on every first visit; a "Reduce motion" toggle in the header (remembered in localStorage,
 `?motion=full|reduced` overrides).
 
 No WebGL / context lost / software renderer (SwiftShader, llvmpipe, "Microsoft Basic Render", or a

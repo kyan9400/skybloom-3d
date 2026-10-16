@@ -23,11 +23,18 @@ Live: https://skybloom-3d.vercel.app
 - **Growth shader for the gardens.** A noise-broken "bloom front" climbs each facade (planter troughs on every slab,
   vines up some bays) and a second instanced mesh of ~20-triangle leaf clusters opens exactly as the front reaches it,
   with wind sway on the high tier.
+- **Real scanned greenery.** The park grove, the trees lining every avenue and the woodland in front of the hero
+  camera are a real CC0 scan (Poly Haven *Island Tree 02*), and roofs and terraces carry scanned plants (Poly Haven
+  *Potted Plant 02*). Each scan is reduced offline (trunk simplified, leaf cards thinned and enlarged), packed into one
+  ~330 KB meshopt + webp glb, and drawn as one instanced draw per sub-mesh with a shader that shares the towers'
+  growth, bloom, fog and day-to-dusk light — trees rise and leaf out with the story. LOD: scans near the camera and
+  in the hero, the old leaf clusters for the far forest ring and facade planters; fewer scans on the medium/low tiers.
+  If the glb fails to load, the district falls back to leaf-cluster trees.
 - **Day-to-dusk light.** Sky gradient, sun, fog, hemisphere light and ground shadows (ray-marched through a small
   generated heightfield of the towers) all come from one time-of-day value.
 - **Performance rules applied:** render on demand, quality tiers chosen from the GPU before the canvas exists,
   idle-aware adaptive DPR, one scroll smoothing layer, shader warm-up (`compileAsync`) behind a loader, no per-frame
-  allocations, reduced-motion by default with a "Turn on full motion" toggle, and a designed SVG poster when WebGL is
+  allocations, full motion by default with a "Reduce motion" toggle (remembered), and a designed SVG poster when WebGL is
   missing, the context is lost or the GPU is a software renderer (SwiftShader, llvmpipe, ...). Append `?quality=low|medium|high` or `?motion=full|reduced` to test.
 
 ## Tech stack
@@ -49,7 +56,8 @@ src/components/     StoryStage (sticky 3D stage), Poster (no-WebGL), MotionToggl
 src/components/three/
   Scene.tsx         Canvas, frame loop, camera path, time of day, adaptive DPR
   city.ts           seeded district layout, leaf clusters, shadow heightfield
-  shaders.ts        sky, ground, tower and plant GLSL
+  shaders.ts        sky, ground, tower, plant and scanned-greenery GLSL
+  greenery.ts       loads public/models/greenery.glb (Poly Haven scans, meshopt + webp)
 src/lib/            quality tiers, motion preference, shared scroll state
 SPEC.md             design spec: concept, copy, palette, budget
 ```

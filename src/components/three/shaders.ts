@@ -503,3 +503,96 @@ void main() {
   #include <colorspace_fragment>
 }
 `;
+
+/* --------------------------------------------------------- SCANNED PLANTS */
+// Instanced Poly Haven scans (street / park trees, roof shrubs). Same instance layout and growth rules as the leaf
+// clusters above, one shader for bark and foliage (uLeaf), so the program compiles once and is shared.
+
+export const scanVertex = /* glsl */ `
+${common}
+uniform float uSway;
+uniform float uLeaf;
+uniform vec3 uCrown; // centre of the canopy in model space: rounds the foliage shading
+attribute vec3 aAnchor;
+attribute vec3 aHost;
+attribute vec4 aPlant;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vCrownN;
+varying vec2 vUv;
+varying float vTint;
+varying float vH;
+void main() {
+  float t = aHost.y > 0.5 ? growth(aHost.x) : 1.0;
+  float ready = aHost.y > 0.5 ? smoothstep(0.82, 1.0, t) : 1.0;
+  float jitter = hash12(aAnchor.xz * 3.1) - 0.5;
+  float open = smoothstep(aAnchor.y - 1.0, aAnchor.y + 1.5, bloomFront(aPlant.y) + jitter * 4.0);
+  // plants come up from the soil: height first, then the crown spreads
+  float s = aPlant.x * ready;
+  vec3 grow = vec3(smoothstep(0.15, 1.0, open), smoothstep(0.0, 0.7, open), smoothstep(0.15, 1.0, open));
+  vTint = aPlant.z;
+  vUv = uv;
+  vH = clamp(position.y / max(uCrown.y * 1.45, 0.01), 0.0, 1.0);
+
+  float a = aPlant.w * 6.2831;
+  float c = cos(a);
+  float si = sin(a);
+  vec3 p = position * grow;
+  // wind: foliage only, more at the top
+  float bend = uLeaf * uSway * max(position.y - 0.4 * uCrown.y, 0.0);
+  p.x += sin(uTime * 1.3 + aPlant.w * 6.2831 + aAnchor.x * 0.35 + position.y * 1.7) * 0.035 * bend;
+  p.z += cos(uTime * 1.1 + aPlant.w * 4.0 + aAnchor.z * 0.3 + position.x * 1.3) * 0.03 * bend;
+  p = vec3(c * p.x - si * p.z, p.y, si * p.x + c * p.z) * s;
+  vNormal = vec3(c * normal.x - si * normal.z, normal.y, si * normal.x + c * normal.z);
+  vec3 cn = normalize(position - uCrown + vec3(0.0, 0.001, 0.0));
+  vCrownN = vec3(c * cn.x - si * cn.z, cn.y, si * cn.x + c * cn.z);
+
+  vec3 anchor = vec3(aAnchor.x, aAnchor.y - aHost.z * (1.0 - t), aAnchor.z);
+  vec3 world = anchor + p;
+  vWorld = world;
+  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+  if (s * open < 0.001) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+}
+`;
+
+export const scanFragment = /* glsl */ `
+${common}
+uniform sampler2D uMap;
+uniform float uLeaf;
+uniform float uMapSize;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vCrownN;
+varying vec2 vUv;
+varying float vTint;
+varying float vH;
+void main() {
+  if (vWorld.y < -0.01) discard;
+  vec4 tex = texture2D(uMap, vUv);
+  if (uLeaf > 0.5) {
+    // alpha-tested leaves keep their coverage in the distance: boost alpha with the mip level
+    vec2 d = vec2(length(dFdx(vUv)), length(dFdy(vUv))) * uMapSize;
+    float lod = max(log2(max(d.x, d.y)), 0.0);
+    if (tex.a * (1.0 + lod * 0.28) < 0.5) discard;
+  }
+  vec3 V = normalize(cameraPosition - vWorld);
+  vec3 n = normalize(vNormal);
+  if (!gl_FrontFacing) n = -n;
+  // foliage: card normals blended with the round canopy normal (soft, volumetric crowns)
+  n = normalize(mix(n, normalize(vCrownN), 0.6 * uLeaf));
+  vec3 base = tex.rgb;
+  // per-plant variation: a little drier, a little lusher
+  base *= mix(vec3(1.0, 1.0, 0.85), vec3(0.8, 1.04, 0.86), vTint);
+  // the scanned leaves are a dry Mediterranean green: pull them towards the district's lusher palette
+  base = mix(base, base * vec3(0.72, 1.0, 0.62) * 1.12, uLeaf);
+  float wrap = pow(dot(n, uSunDir) * 0.5 + 0.5, 1.5);
+  float ao = mix(0.55, 1.0, uLeaf > 0.5 ? vH : 1.0);
+  vec3 col = base * (uSunColor * wrap * 1.1 + hemi(n) * 0.7) * ao;
+  // back-lit leaves glow at golden hour (cheap subsurface)
+  float back = pow(max(dot(-V, uSunDir), 0.0), 4.0) * 0.45 * uLeaf;
+  col += base * vec3(0.9, 1.1, 0.5) * uSunColor * back;
+  col = applyFog(col, vWorld);
+  gl_FragColor = vec4(filmic(col), 1.0);
+  #include <colorspace_fragment>
+}
+`;

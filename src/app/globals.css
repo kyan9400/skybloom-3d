@@ -1287,3 +1287,4 @@ html.reduce-motion *::after {
     scroll-behavior: auto;
   }
 }
+/* full motion is the default (even with the OS setting on); the header toggle adds html.reduce-motion */

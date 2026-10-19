@@ -21,7 +21,7 @@ export default function SiteFooter({ nav }: { nav: readonly { href: string; labe
         <div className="site-footer__credit">
           <p>
             Design &amp; development by{" "}
-            <a href={PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">
+            <a href={process.env.NEXT_PUBLIC_PORTFOLIO_URL ?? PORTFOLIO_URL} target="_blank" rel="noopener noreferrer">
               Alhassan Alfarran
             </a>{" "}
             ·{" "}
